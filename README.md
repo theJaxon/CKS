@@ -177,6 +177,43 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 ```
 
 ---
+---
+
+### :purple_circle: Minimize Microservice Vulnerabilities:
+#### 3. Manage kubernetes secrets
+* Get a secret from ETCD 
+```bash
+k create secret generic s1 --from-literal=user=admin
+
+ETCDCTL_API=3 etcdctl get /registry/secrets/<namespace>/<secret-name> \ 
+--cacert /etc/kubernetes/pki/etcd/ca.crt \
+--cert /etc/kubernetes/pki/etcd/server.crt \
+--key /etc/kubernetes/pki/etcd/server.key 
+```
+
+<details>
+<summary>Output</summary>
+<p>
+
+```
+/registry/secrets/default/s1
+k8s
+
+
+v1Secret
+
+s1default"*$55889b6d-02cc-4e3c-b872-74fe658299312ݭz_
+kubectl-createUpdatevݭFieldsV1:-
++{"f:data":{".":{},"f:user":{}},"f:type":{}}
+useradminOpaque"
+```
+
+</p>
+</details>
+
+* Encrypting ETCD and secrets inside it
+This is done by creating an **`EncryptionConfiguration`** object and passing this object to the API server `--encryption-provider-config` which is the component responsible for communicating with ETCD.
+
 
 
 Qs:
@@ -311,4 +348,61 @@ k config set-credentials jim --client-certificate=jim.crt --client-key=jim.key -
 k create clusterrole deploy-deleter --verb=delete --resource=deploy $do
 k create clusterrolebinding crb1 --clusterrole=deploy-deleter --user=jane
 k create rolebinding  jim-rb --clusterrole=deploy-deleter --user=jim --namespace red
+```
+
+---
+
+### Irrelevant to CSK but valuable regarding security:
+#### 1.Never store sensitive information in an image:
+* This example is from the book **container security** by Liz Rice
+```Dockerfile
+FROM alpine 
+RUN echo "password" > /password.txt 
+RUN rm /password.txt 
+```
+
+```bash
+# Build the image and check for the file 
+sudo docker build . -t sensitive
+docker run --rm -it sensistive cat /password.txt # File doesn't exist
+docker save sensitive > sensitive.tar
+mkdir sensitive && cd $_ && mv ../sensitive.tar .
+tar xvf sensitive.tar 
+cat manifest.json # First line displays the config file
+cat 7480*.json | jq '.history'
+```
+
+<details>
+<summary>JSON output</summary>
+<p>
+
+```json
+[
+  {
+    "created": "2020-12-17T00:19:41.960367136Z",
+    "created_by": "/bin/sh -c #(nop) ADD file:ec475c2abb2d46435286b5ae5efacf5b50b1a9e3b6293b69db3c0172b5b9658b in / "
+  },
+  {
+    "created": "2020-12-17T00:19:42.11518025Z",
+    "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/sh\"]",
+    "empty_layer": true
+  },
+  {
+    "created": "2020-12-29T11:17:07.969695162Z",
+    "created_by": "/bin/sh -c echo \"Password\" > /password.txt"
+  },
+  {
+    "created": "2020-12-29T11:17:08.566905631Z",
+    "created_by": "/bin/sh -c rm /password.txt"
+  }
+]
+```
+
+</p>
+</details>
+
+```bash
+# Extract files from the layer 
+tar -xvf 173af461747ed9252ce5c8241a8e2dfbe85ef7a838945445be6ada05f7c6a883/layer.tar
+cat password.txt # Shows password 
 ```
