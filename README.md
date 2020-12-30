@@ -30,6 +30,13 @@ k replace -f <file>.yml --force
 # Inspecting certificates 
 openssl x509 -in /etc/kubernetes/pki/apiserver.crt -text
 
+# Encrypt all secrets after creating a new EncryptionConfiguration
+k get secrets -A -oyaml | k replace -f - # This creates all secrets again but they get created according to the first provider defined in the EncryptionConfig file
+
+# Crictl 
+crictl pull <image-name>
+crictl ps 
+circtl pods 
 ```
 
 #### NetworkPolicies:
@@ -180,7 +187,7 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 ---
 
 ### :purple_circle: Minimize Microservice Vulnerabilities:
-#### 3. Manage kubernetes secrets
+#### :small_blue_diamond: 2. Manage kubernetes secrets
 * Get a secret from ETCD 
 ```bash
 k create secret generic s1 --from-literal=user=admin
@@ -211,10 +218,195 @@ useradminOpaque"
 </p>
 </details>
 
-* Encrypting ETCD and secrets inside it
-This is done by creating an **`EncryptionConfiguration`** object and passing this object to the API server `--encryption-provider-config` which is the component responsible for communicating with ETCD.
+* Encrypting ETCD and secrets inside it:
+This is done by creating an [**`EncryptionConfiguration`**](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) object and passing this object to the API server `--encryption-provider-config` which is the component responsible for communicating with ETCD.
+
+How EncryptionConfiguration works?
+- Under `resources` we specify the resources to be encrypted
+- Under `providers` section we specify an array of providers:
+  - `identity` provider is the default and it doesn't encrypt anything.
+  - `aesgcm` | `aescbc` and those are 2 encryption algorithms that can be used
+- The provider section works in order so the first provider defined is used for **encryption on save**
+
+Example 1:
+```yaml
+providers:
+- identity: {} # Store secrets UNENCRYPTED
+- aesgcm:
+    keys:
+    - name: key1
+      secret: base64-encoded-text
+- aescbc:
+    keys:
+    - name: key2
+      secret: base64-encoded-text
+```
+When reading secrets using the previous example they can be read as either 
+- unencrypted 
+- aesgcm encrypted
+- aescbc encrypted
+
+---
+
+Example 2:
+```yaml
+providers:
+- aesgcm: # All new secrets will be stored ENCRYPTED
+    keys:
+    - name: key1
+      secret: base64
+    - name: key2
+      secret: base64
+- identity: {} 
+```
+Secrets can be read as either
+- Encrypted aesgcm
+- Unencrypted
+
+---
+
+Apply an EncryptionConfiguration file:
+```yaml
+echo random-password | base64 # cmFuZG9tLXBhc3N3b3JkCg== will be the value of the aescbc secret
+mkdir -p /etc/kubernetes/etcd
+vi /etc/kubernetes/etcd/ec.yml
+
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+    - secrets
+    providers:
+    - aescbc:
+        keys:
+        - name: key1
+          secret: cmFuZG9tLXBhc3N3b3JkCg==
+    - identity: {}
+
+# Refernce this file in the api-server
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+--encryption-provider-config=/etc/kubernetes/etcd/ec.yml
+
+# Add volume 
+volumes:
+- name: etcd-v 
+  hostPath:
+    path: /etc/kubernetes/etcd
+    type: DirectoryOrCreate
+
+# Mount the vol in the container 
+volumeMounts:
+- name: etcd-v 
+  mountPath: /etc/kubernetes/etcd
+  readOny: True 
+```
+
+Test if things worked as expected:
+```bash
+k create secret generic j1 --from-literal=user=admin
+sudo ETCDCTL_API=3 etcdctl get /registry/secrets/default/j1 
+--cacert /etc/kubernetes/pki/etcd/ca.crt 
+--cert /etc/kubernetes/pki/etcd/server.crt 
+--key /etc/kubernetes/pki/etcd/server.key  # Shows gibberish text so our secret is now encrypted in ETCD
+```
+
+Encrypt all secrets that existed
+```
+k get secret -A -oyaml | k replace -f -
+```
+
+---
+
+#### :small_blue_diamond: 3. Use container runtime sandboxes in multi-tenant environments [gvisor, kata containers]:
+* A sandbox is an additional security layer to reduce the attack surface
+Introducing sandboxes adds another defense layer but it comes with its costs too
+- More resources are needed
+- Not good for syscall heavy workloads
+
+##### [Kata Containers](https://github.com/kata-containers/kata-containers):
+- Runs containers inside a lightweight VM thus providing a strong separation layer
+
+##### [gVisor](https://github.com/google/gvisor):
+- A kernel that runs in user-space.
+- Not VM based 
+- Simulates kernel syscalls with limited functionality
+- Runtime is called `runsc`
+
+Install gVisor/runsc with containerd:
+```bash
+sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common
+
+# Configure keys
+curl -fsSL https://gvisor.dev/archive.key | sudo apt-key add -
+sudo add-apt-repository "deb https://storage.googleapis.com/gvisor/releases release main"
+
+# Install runsc, gvisor-containerd-shim and containerd-shim-runsc-v1 binaries
+sudo apt-get update && sudo apt-get install -y runsc
+
+# Modify config.toml file to enable runsc in containerd
+vi /etc/containerd/config.toml
+```
+
+```toml
+disabled_plugins = ["restart"]
+[plugins.linux]
+  shim_debug = true
+[plugins.cri.containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
+```
+
+```bash
+# Use containerd by default in crictl
+vi /etc/crictl.yaml
+runtime-endpoint: unix:///run/containerd/containerd.sock
+sudo systemctl restart containerd
+
+# Make kubelet use containerd
+vi /etc/default/kubelet
+KUBELET_EXTRA_ARGS="--container-runtime remote --container-runtime-endpoint unix:///run/containerd/containerd.sock"
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+```
+
+Confirm that container runtime was successfully changed for worker2:
+```bash
+vagrant@master:~$ k get nodes -o wide
+NAME      STATUS   ROLES    AGE     VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION     CONTAINER-RUNTIME
+master    Ready    master   7d11h   v1.20.1   192.168.100.10   <none>        Ubuntu 20.04.1 LTS   5.4.0-42-generic   docker://19.3.8
+worker1   Ready    <none>   7d10h   v1.20.1   192.168.100.11   <none>        Ubuntu 20.04.1 LTS   5.4.0-42-generic   docker://19.3.8
+worker2   Ready    <none>   7d10h   v1.20.1   192.168.100.12   <none>        Ubuntu 20.04.1 LTS   5.4.0-42-generic   containerd://1.3.3-0ubuntu2
+```
+
+Create a [runtime class](https://kubernetes.io/docs/concepts/containers/runtime-class/) for `runsc` (gVisor) runtime:
+- The runtime class allows us to specify a different runtime handler 
+- You can then specify that some pods use this specific runtime class
+
+```yaml
+apiVersion: node.k8s.io/v1beta1  
+kind: RuntimeClass
+metadata:
+  name: gvisor 
+handler: runsc 
+```
+Test the runtime class
+```bash
+# Create nginx pod 
+k run gvisor --image=nginx $do > gvisor-po.yml 
+vi gvisor-po.yml
+```
+
+```yaml
+spec:
+  runtimeClassName: gvisor
+  containers:
+  - image: nginx
+    name: gvisor
+```
 
 
+
+---
+---
 
 Qs:
 
