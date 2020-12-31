@@ -332,6 +332,8 @@ Introducing sandboxes adds another defense layer but it comes with its costs too
 - Simulates kernel syscalls with limited functionality
 - Runtime is called `runsc`
 
+![gVisor](https://github.com/theJaxon/CKS/blob/main/etc/gVisor/gVisor.png)
+
 Install gVisor/runsc with containerd:
 ```bash
 sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common
