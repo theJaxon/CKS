@@ -1,0 +1,19 @@
+# https://kubernetes.io/docs/concepts/policy/pod-security-policy/#create-a-policy-and-a-pod
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: default
+spec:
+  privileged: False
+  allowPrivilegeEscalation: False 
+  # The rest fills in some required fields.
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  volumes:
+  - '*'

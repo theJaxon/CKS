@@ -140,7 +140,7 @@ curl localhost:8888 # Shows all API endpoints, no need for authentication nor au
 ```
 * Disable the insecure port by setting it to zero `--insecure-port=0`
 
-#### 3.Don't expose kube-apiserver to the outside:
+##### 3.Don't expose kube-apiserver to the outside:
 Make the api-server accessible externally by modifying the `kubernetes` svc and changing its type to `NodePort`
 ```bash
 k edit svc kubernetes
@@ -151,7 +151,7 @@ type: NodePort
 * Copy the kubeconfig file on the host `scp <user>@<ip>:/home/<user>/.kube/conf .`
 * Access externally using kubectl as `kubectl --kubeconfig conf get po`
 
-#### 4.Restrict access from nodes to API using NodeRestriction admission controller:
+##### 4.Restrict access from nodes to API using NodeRestriction admission controller:
 * Enable NodeRestriction using `--enable-admission-plugins=NodeRestriction`
 * Limits node labels that can be modified by the kubelet
 * This ensures secure workload via labels
@@ -171,7 +171,7 @@ sudo kubectl label node worker1 node=worker1 --kubeconfig /etc/kubernetes/kubele
 ```
 * Node restriction also prevents setting a label starting with `node-restriction.kubernetes.io`
 
-#### Connecting to the API server manually with certificates:
+##### Connecting to the API server manually with certificates:
 * `k config view --raw` shows the certificates encoded in the config file .. 3 files will be extracted from the config file in order to manually connect to the server 
 1. certificate-authority
 2. client-certificate
@@ -187,6 +187,144 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 ---
 
 ### :purple_circle: Minimize Microservice Vulnerabilities:
+#### :small_blue_diamond: 1. Setup appropriate OS level security domains [PSP, OPA, security contexts]:
+
+Security context:
+- Used to define privilege and access control.
+- Can be defined at pod level (applies to all containers) or at a container level
+
+<details>
+<summary>SecurityContext at Pod level</summary>
+<p>
+
+```bash
+k explain pod.spec.securityContext --recursive
+fsGroup      <integer>
+fsGroupChangePolicy  <string>
+runAsGroup   <integer>
+runAsNonRoot <boolean>
+runAsUser    <integer>
+seLinuxOptions       <Object>
+seccompProfile       <Object>
+supplementalGroups   <[]integer>
+sysctls      <[]Object>
+```
+
+</p>
+</details>
+
+<details>
+<summary>SecurityContext at container level</summary>
+<p>
+
+```bash
+k explain pod.spec.containers.securityContext --recursive
+allowPrivilegeEscalation     <boolean>
+capabilities <Object>
+privileged   <boolean>
+procMount    <string>
+readOnlyRootFilesystem       <boolean>
+runAsGroup   <integer>
+runAsNonRoot <boolean>
+runAsUser    <integer>
+seLinuxOptions       <Object>
+seccompProfile       <Object>
+```
+
+</p>
+</details>
+
+##### Privileged containers:
+- By default docker containers run unprivileged, although they're running as root but they're actually giving just a portion of the capabilites.
+- Privileged containers are given all the `Capabilities` which is very dangerous.
+- To allow container to become a privileged one use `privileged: True` security context.
+
+Example - Changing hostname inside the container:
+```bash
+k run alpine --image=alpine --command sleep 3600 
+k exec -it alpine -- sh
+apk add strace libcap
+strace hostname jaxon
+# write(2, "hostname: sethostname: Operation"..., 47hostname: sethostname: Operation not permitted
+# View capabilites for this container in unprivileged mode
+capsh --print 
+Current: = cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,cap_net_raw,cap_sys_chroot,cap_mknod,cap_audit_write,cap_setfcap+eip
+```
+The container needs sethostname which exists in `CAP_SYS_ADMIN` , now setting `privileged: True` will add this capability (in addition to the rest of them)
+```yaml
+spec:
+  containers:
+  - command:
+    - sleep
+    - "3600"
+    image: alpine
+    name: alpine
+    securityContext:
+      privileged: True
+```
+```bash
+k replace -f alpine.yml --force 
+vagrant@master:~$ k exec -it alpine -- sh
+/# hostname
+alpine
+/# hostname jaxon
+/# hostname
+jaxon # Success
+
+# View list of capabilities for this container
+apk add libcap
+
+/# capsh --print
+Current: = cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_linux_immutable,cap_net_bind_service,cap_net_broadcast,cap_net_admin,cap_net_raw,cap_ipc_lock,cap_ipc_owner,cap_sys_module,cap_sys_rawio,cap_sys_chroot,cap_sys_ptrace,cap_sys_pacct,cap_sys_admin,cap_sys_boot,cap_sys_nice,cap_sys_resource,cap_sys_time,cap_sys_tty_config,cap_mknod,cap_lease,cap_audit_write,cap_audit_control,cap_setfcap,cap_mac_override,cap_mac_admin,cap_syslog,cap_wake_alarm,cap_block_suspend,cap_audit_read+eip
+```
+
+##### [Privilege escalation](https://kubernetes.io/docs/concepts/policy/pod-security-policy/#privilege-escalation):
+- Privilege escalation controls whether a process can gain more privileges than its partent process
+- By default k8s allows privilege escalation so you should set `allowPrivilegeEscalation: False` at the container level
+
+```yaml
+spec:
+  containers:
+  - command:
+    - sleep
+    - "3600"
+    image: alpine
+    name: alpine
+    securityContext:
+      allowPrivilegeEscalation: True 
+```
+```bash
+# Check privilege escalation flag
+k exec alpine -- cat /proc/1/status
+NoNewPrivs:     0 # Allow privilege escalation
+
+vi alpine.yml
+allowPrivilegeEscalation: False 
+k replace -f alpine.yml --force
+k exec alpine -- cat /proc/1/status
+NoNewPrivs:     1 # Disable privilege escalation
+```
+
+##### [Pod security policy](https://kubernetes.io/docs/concepts/policy/pod-security-policy/):
+- Pod security policy is an admission controller which controls under which security conditions a pod has to run
+- Can be enabled by modifying kube-apiserver manifest `--enable-admission-plugins=PodSecurityPolicy`
+
+```yaml
+spec:
+  privileged: False
+  allowPrivilegeEscalation: False 
+  # The rest fills in some required fields.
+```
+- This ensures that privileged pods or those who allow privilege escalation will not be created.
+- The default service account need to be modified so that the newly created deployment work with the PodSecurityPolicy
+ 
+```bash
+k create role psp-access --verb=use --resource=podsecuritypolicies
+k create rolebinding psp-access --role=psp-access --serviceaccount=default:default
+```
+
+---
+
 #### :small_blue_diamond: 2. Manage kubernetes secrets
 * Get a secret from ETCD 
 ```bash
