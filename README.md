@@ -323,6 +323,45 @@ k create role psp-access --verb=use --resource=podsecuritypolicies
 k create rolebinding psp-access --role=psp-access --serviceaccount=default:default
 ```
 
+##### [Open Policy Agent](https://github.com/open-policy-agent/opa) [OPA]:
+- A general-purpose policy engine that enables unified, context-aware policy enforcement across the entire stack.
+- OPA [Gatekeeper](https://github.com/open-policy-agent/gatekeeper) makes OPA easier to use with kubernetes through the creation of CRDs
+- OPA Gatekeeper consists mainly of 3 parts:
+  1. A webhook server and a generic ValidatingWebhookConfiguration
+  2. [`ConstraintTemplate`](https://kubernetes.io/blog/2019/08/06/opa-gatekeeper-policy-and-governance-for-kubernetes/#policies-and-constraints) which describes the admission control policy
+  3. `Constraint` that gets created based on the previous ConstraintTemplate
+
+Install OPA gatekeeper:
+```bash
+k apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper/release-3.1/deploy/gatekeeper.yaml
+
+# List the newly creatd CRDs
+k get crd
+NAME                                                
+configs.config.gatekeeper.sh                         
+constraintpodstatuses.status.gatekeeper.sh           
+constrainttemplatepodstatuses.status.gatekeeper.sh  
+constrainttemplates.templates.gatekeeper.sh   
+```
+
+Constraint template example:
+```yaml
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabel 
+```
+- This constraint template generates a CRD of type k8srequiredlabel which can be used as a `kind` in `Constraint`
+
+##### Admission Webhooks:
+- Admission webhooks are more like admission controllers, there are 2 types of them
+1. [Validating admission webhook](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#validatingadmissionwebhook)
+2. Mutating admission webhook
+- When you create a new object it needs to pass through these webhooks
+- A validating admission webhook just validates the pod definition (either approves or denies it)
+- A mutating admission webhook modifies the pod definition
+- OPA workes with **validating admission webhook**
+
 ---
 
 #### :small_blue_diamond: 2. Manage kubernetes secrets
@@ -542,6 +581,49 @@ spec:
   - image: nginx
     name: gvisor
 ```
+
+---
+
+#### :small_blue_diamond: 4. Implement pod to pod encryption by use of mTLS:
+- mTLS stands for Mutual TLS
+- Two-way authentication (the 2 parties are authenticating each other at the same time)
+- Service Mesh manages the whole process (Istio or linkerd) are deployed as side cars.
+
+##### :car: Create proxy sidecar:
+
+```bash
+k run main-container --image=bash $do > main-container.yml --command ping google.com
+k apply -f main-container.yml
+vi main-container.yml 
+```
+
+```yaml
+# Additional side car container that uses iptables and thus needs NET_ADMIN capability
+- name: proxy 
+  image: ubuntu
+  command: 
+  - sh
+  - -c
+  - 'apt-get update && apt-get install iptables -y && iptables -L && sleep 1d'
+  securityContext:
+    capabilites:
+      add:
+      - NET_ADMIN
+```
+
+---
+---
+
+### :purple_circle: Supply Chain Security:
+#### :small_blue_diamond: 1. Minimize base image footprint:
+- Only instructions `RUN` `COPY` and `ADD` create layers, other instructions create temporary intermediate images and don't increase build size.
+- Image footprint can be reduced using **Multi stage builds**
+
+##### Secure and harden the image:
+1. Use specific base image version instead of ~~latest~~
+2. Don't run as USER ~~root~~
+3. Make Filesystem `ReadOnly` `pod.spec.containers.securityContext.readOnlyRootFilesystem` 
+4. Remove Shell access `RUN rm -rf /bin/bash /bin/sh`
 
 
 

@@ -1,0 +1,11 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: MinReplicaCount
+metadata:
+  name: enforce-min-replicas
+spec:
+  match:
+    kinds:
+      - apiGroups: ["*"]
+        kinds: ["Deployment"]
+  parameters:
+    min: 2
