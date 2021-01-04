@@ -308,6 +308,7 @@ NoNewPrivs:     1 # Disable privilege escalation
 ##### [Pod security policy](https://kubernetes.io/docs/concepts/policy/pod-security-policy/):
 - Pod security policy is an admission controller which controls under which security conditions a pod has to run
 - Can be enabled by modifying kube-apiserver manifest `--enable-admission-plugins=PodSecurityPolicy`
+- PodSecurityPolicy or OPA can be used to enhance security by enforcing that only specific container registries are allowed.
 
 ```yaml
 spec:
@@ -625,7 +626,128 @@ vi main-container.yml
 3. Make Filesystem `ReadOnly` `pod.spec.containers.securityContext.readOnlyRootFilesystem` 
 4. Remove Shell access `RUN rm -rf /bin/bash /bin/sh`
 
+#### :small_blue_diamond: 2. Secure your supply chain: whitelist allowed image registries, sign and validate images:
+##### Private registries with Kubernetes:
+- A secret of type [`docker-registry`](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-pod-that-uses-your-secret) is created that contains the login details for the private registry.
+- The secret is then refernced using `pod.spec.containers.imagePullSecrets`
+- Another approach is to add the secret to the ServiceAccount of the container `k patch sa default -p '{"imagePullSecrets": [{"name": "secret-name"}]}' 
 
+##### List all registries used in the cluster:
+```bash
+k get po -A -oyaml | grep "image:" | grep -v "f:" # -v is invert match means it grep all lines that doesn't match this one
+```
+
+##### Use image digest instead of version for kube-apiserver:
+- The problem with using image tags is that the image itself might be changed, a tag like image:18 doesn't truely ensure that the same image will be used each and every time, only a digest ensures this since there can only be a unique digest (read more in the article [Docker Tag vs Hash: A Lesson in Deterministic Ops](https://medium.com/@tariq.m.islam/container-deployments-a-lesson-in-deterministic-ops-a4a467b14a03))
+```bash
+k get po -n kube-system -l component=kube-apiserver -o yaml | grep imageID
+# imageID: docker-pullable://k8s.gcr.io/kube-apiserver@sha256:6ea8c40355df6c6c47050448e1f88cb4a5d618e9e96717818d4e11fcfe156ee0
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+# Replace image with k8s.gcr.io/kube-apiserver@sha256:6ea8c40355df6c6c47050448e1f88cb4a5d618e9e96717818d4e11fcfe156ee0
+```
+
+##### Whitelist some registries with OPA:
+Allow only images from docker.io and k8s.gcr.io to be used
+
+<details>
+<summary>ConstraintTemplate</summary>
+<p>
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: whitelistregistries
+spec:
+  crd:
+    spec:
+      names:
+        kind: WhitelistRegistries
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package whitelistregistries
+        
+        violation[{"msg": msg}] {
+          image := input.review.object.spec.containers[_].image 
+          not startswith(image, "docker.io/")
+          not startswith(image, "k8s.gcr.io/")
+          msg := "This image isn't trusted !"
+        }
+```
+
+</p>
+</details>
+
+<details>
+<summary>Constraint</summary>
+<p>
+
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: WhitelistRegistries
+metadata:
+  name: whitelist-registries
+spec:
+  match:
+    kinds:
+      - apiGroups: ["*"]
+        kinds: ["Pod"]
+```
+
+</p>
+</details>
+
+```bash
+# Test the policy 
+k run node-exporter --image=quay.io/prometheus/node-exporter
+# Error from server ([denied by whitelist-registries] This image isn't trusted !): admission webhook "validation.gatekeeper.sh" denied the request: [denied by whitelist-registries] This image isn't trusted !
+```
+
+##### [ImagePolicyWebhook](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#imagepolicywebhook):
+- If `ImagePolicyWebhook` admission controller is enabled then the request goes through it, if `ImageReview` succeeds from the external service then the request succeeds.
+
+```yaml
+# Create AdmissionConfiguration
+apiVersion: apiserver.config.k8s.io/v1
+kind: AdmissionConfiguration
+plugins:
+- name: ImagePolicyWebhook
+  configuration:
+    imagePolicy:
+      kubeConfigFile: /etc/kubernetes/admission/kubeconf
+      allowTTL: 50
+      denyTTL: 50 
+      retryBackoff: 500
+      defaultAllow: False # Deny all pod creation if external server wasn't available
+# Enable ImagePolicyWebhook
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+- --enable-admission-plugins=NodeRestriction,ImagePolicyWebhook
+- --admission-control-config-file=/etc/kubernetes/admission/admission_config.yml
+
+```
+
+#### :small_blue_diamond: 3. Static analysis (Linting) of user workloads [K8s resources, Dockerfiles]:
+- Checks the source code and text files against specific rules in order to enforce these rules.
+- Static analysis rules examples:
+  - Always define resource requests and limits 
+  - Pods should never use the default Service account.
+- [Kubesec](https://github.com/controlplaneio/kubesec) can do the security risk analysis for the kubernetes resources `kubesec scan <file>.yml`
+- [Conftest](https://github.com/open-policy-agent/conftest) is used to write tests that can be used against the yaml definitions and Dockerfiles
+
+#### :small_blue_diamond: 4. Scan images for known vulnerabilities:
+- The base image may contain vulnerabilities or the software installed on top of it in another layer might container a vulnerability.
+- There exists databases (ex: [CVE](https://cve.mitre.org/), [NVD](https://nvd.nist.gov/)) for known vulnerabilites and these DBs are used by tools to scan for already known vulnerabilites.
+- [Clair](https://github.com/quay/clair) or [Trivy](https://github.com/aquasecurity/trivy) can be used to do vulnerability scanning (This is also considered static analysis)
+
+##### [Install trivy](https://github.com/aquasecurity/trivy#debianubuntu):
+```
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" > /etc/apt/sources.list.d/trivy.list
+apt-get update && apt-get install trivy
+
+trivy image <name>
+```
 
 ---
 ---

@@ -1,0 +1,20 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: whitelistregistries
+spec:
+  crd:
+    spec:
+      names:
+        kind: WhitelistRegistries
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package whitelistregistries
+        
+        violation[{"msg": msg}] {
+          image := input.review.object.spec.containers[_].image 
+          not startswith(image, "docker.io/")
+          not startswith(image, "k8s.gcr.io/")
+          msg := "This image isn't trusted !"
+        }
