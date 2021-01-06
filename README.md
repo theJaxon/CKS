@@ -12,6 +12,11 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 /run/secrets/kubernetes.io/serviceaccount
   /token # The token from the secret that gets created with the sa is here
 
+/proc
+/proc/<PID>/fd # Shows files opened by this process
+
+/etc/falco # Main config file is falco.yml
+
 ```
 
 #### Useful commands:
@@ -626,6 +631,8 @@ vi main-container.yml
 3. Make Filesystem `ReadOnly` `pod.spec.containers.securityContext.readOnlyRootFilesystem` 
 4. Remove Shell access `RUN rm -rf /bin/bash /bin/sh`
 
+---
+
 #### :small_blue_diamond: 2. Secure your supply chain: whitelist allowed image registries, sign and validate images:
 ##### Private registries with Kubernetes:
 - A secret of type [`docker-registry`](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-pod-that-uses-your-secret) is created that contains the login details for the private registry.
@@ -735,6 +742,8 @@ sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
 - [Kubesec](https://github.com/controlplaneio/kubesec) can do the security risk analysis for the kubernetes resources `kubesec scan <file>.yml`
 - [Conftest](https://github.com/open-policy-agent/conftest) is used to write tests that can be used against the yaml definitions and Dockerfiles
 
+---
+
 #### :small_blue_diamond: 4. Scan images for known vulnerabilities:
 - The base image may contain vulnerabilities or the software installed on top of it in another layer might container a vulnerability.
 - There exists databases (ex: [CVE](https://cve.mitre.org/), [NVD](https://nvd.nist.gov/)) for known vulnerabilites and these DBs are used by tools to scan for already known vulnerabilites.
@@ -748,6 +757,97 @@ apt-get update && apt-get install trivy
 
 trivy image <name>
 ```
+
+---
+---
+
+### :purple_circle: Monitoring, Logging and Runtime Security:
+#### :small_blue_diamond: 1. Perform behavioral analytics of syscall process and file activities at the host and container level to detect malicious activities:
+##### Strace:
+- A tool that intercepts and logs syscalls made by a process which is helpful for diagnostics and debugging
+- It can log and display signals received by a process
+```bash
+strace <linux-command>
+strace ls -lah
+strace -cw ls -lah # -cw is used to summarize the output
+
+# Using strace with etcd
+ps aux | grep etcd # check the process number
+sudo strace -p <PID> -f -cw
+
+cd /proc/<PID> && ls -lah
+sudo ls -lah exe # lrwxrwxrwx 1 root root 0 Jan  5 13:58 exe -> /usr/local/bin/etcd
+
+# Check open files by etcd
+cd fd && ls -lah #  /var/lib/etcd/member/snap/db <file 7>
+tail 7
+
+# Test creating a secret and reading it from the file
+k create secret generic password --from-literal pass=securepasswd
+cat 7 | strings | grep securepasswd -A10 -B10 # Stored at "/registry/secrets/default/password 
+```
+
+##### /proc directory:
+- Contains information and connections to processes and kernel
+- /proc/<pid>/environ # Contains environment variables in use for the container
+
+##### [Falco](https://github.com/falcosecurity/falco) by Sysdig:
+- Cloud native runtime security tool
+Install [falco](https://v1-16.docs.kubernetes.io/docs/tasks/debug-application-cluster/falco/):
+```bash
+curl -s https://falco.org/repo/falcosecurity-3672BA8F.asc | apt-key add -
+echo "deb https://dl.bintray.com/falcosecurity/deb stable main" | tee -a /etc/apt/sources.list.d/falcosecurity.list
+apt-get update -y && apt-get -y install linux-headers-$(uname -r) falco
+systemctl start falco
+journalctl -u falco
+```
+
+##### Overriding default Falco rules:
+```bash
+vi /etc/falco/falco_rules.yaml # Copy the rule that we need to change 
+vi /etc/falco/falco_rules.local.yaml 
+```
+
+<details>
+<summary>falco_rules.local.yaml</summary>
+<p>
+
+```yaml
+- rule: Terminal shell in container
+  desc: A shell was used as the entrypoint/exec point into a container with an attached terminal.
+  condition: >
+    spawned_process and container
+    and shell_procs and proc.tty != 0
+    and container_entrypoint
+    and not user_expected_terminal_shell_in_container_conditions
+  output: >
+    A shell was spawned in a container with an attached terminal (user=%user.name user_loginuid=%user.loginuid %container.info
+    shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline terminal=%proc.tty container_id=%container.id image=%container.image.repository)
+  priority: WARNING # Changed from NOTICE to WARNING
+  tags: [container, shell, mitre_execution]
+```
+
+</p>
+</details>
+
+- If we run the command `falco` then `falco_rules.yaml` is read first then `falco_rules.local.yaml` is read after it thus overriding the rule.
+
+---
+
+#### :small_blue_diamond: 5. Ensure immutability of containers at runtime:
+- Container [immutability](http://chadfowler.com/2013/06/23/immutable-deployments.html) means that the container won't be modified during its lifetime
+- This adds more reliability and better security on container level, it also allows easy rollbacks.
+
+#### Enforce immutability on a container level:
+- Remove bash/sh from the container
+- Make Filesystem read-only using **SecurityContext** or **PodSecurityPolicy**
+- Run as specific user, never run as root
+
+##### Ways to do it in Kubernetes:
+1. Make manual changes to the `command` (Override the default ENTRYPOINT) `chmod a-w-R && nginx`
+2. Use **StartupProbe** to execute the command (StartupProbe gets executed before readiness and liveness probes) `chmod a-w-R /`
+3. Use securityContext and PodSecurityPolicy **Preferred solution**
+4. Use `InitContainer` to do the command execution and modify the files (the initContainer will be given **RW** permissions) then the app container will be given only read permission
 
 ---
 ---
@@ -838,7 +938,6 @@ spec:
 
 k annotate deploy snow kubernetes.io/change-cause="Add cache-v volume"
 ```
-
 
 ---
 
