@@ -1,0 +1,18 @@
+apiVersion: audit.k8s.io/v1 
+kind: Policy 
+omitStages:
+- "RequestReceived"
+rules:
+- level: None # Log nothing regarding "read" actions
+  verbs: ["get", "watch", "list"]
+- level: None 
+  resources:
+  - group: "" # Log No events
+    resources: ["events"]
+- level: None 
+  userGroups: ["system:nodes"]
+- level: RequestResponse 
+  resources:
+  - group: ""
+    resources: ["secrets"]
+- level: Metadata # Log metadata for everything else

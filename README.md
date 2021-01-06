@@ -19,6 +19,8 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 
 ```
 
+---
+
 #### Useful commands:
 ```bash
 # Copy the whole filesystem from a docker container to a new folder on the host 
@@ -43,6 +45,13 @@ crictl pull <image-name>
 crictl ps 
 circtl pods 
 ```
+
+---
+
+#### Important Documentation pages for CKS:
+1. [Auditing](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
+
+---
 
 #### NetworkPolicies:
 * Firewall rules in K8s.
@@ -850,6 +859,84 @@ vi /etc/falco/falco_rules.local.yaml
 4. Use `InitContainer` to do the command execution and modify the files (the initContainer will be given **RW** permissions) then the app container will be given only read permission
 
 ---
+
+#### :small_blue_diamond: 6.Use Audit Logs to monitor access:
+- Any request made to the kubernetes API server should be logged (This forms our Audit logs)
+- Audit logs allow us to answer questions like:
+  - When was the last time user X accessed cluster Y
+  - Did someone access a secret while it wasn't protected ?
+  - Does CRDs work properly ?
+- Each request can be recorded with an associated stage, these are:
+  1. RequestReceived # Stage for events generated whenever the API server receives the request
+  2. ResponseStarted # Once the response headers are sent but before the response body is sent (this stage is generated only for long-running requests like `watch`)
+  3. ResponseComplete # Response body has completed
+  4. Panic 
+- Audit policy consits of 4 levels:
+  1. None # don't log events that match this rule
+  2. Metadata # Log metadata like requesting user, timestamp, resource and verb
+  3. Request # Logs metadata and request body
+  4. RequestResponse # Log metadata, request body and response body 
+
+##### Configure API server to store audit logs in JSON format:
+```yaml
+mkdir -p /etc/kubernetes/audit
+vi /etc/kubernetes/audit/simple.yml
+
+apiVersion: audit.k8s.io/v1 
+kind: Policy 
+rules:
+- level: Metadata 
+
+# Enable auditing in the manifests through kube-apiserver.yaml
+vi /etc/kubernetes/manifests/kube-apiserver.yaml
+# From the documentation grab the flags needed https://kubernetes.io/docs/tasks/debug-application-cluster/audit/#log-backend
+--audit-policy-file
+--audit-log-path 
+--audit-log-maxsize # Max size in Megabytes
+--audit-log-maxbackup # Max number of audit logs to retain
+
+# Add the policy folder as a volume and mount it 
+volumes:
+- name: audit-v
+  hostPath:
+    path: /etc/kubernetes/audit
+    type: DirectoryOrCreate
+
+volumeMounts:
+- name: audit-v
+  mountPath: /etc/kubernetes/audit
+```
+
+##### Create a secret and investigate the audit log:
+```yaml
+k create secret generic audit-secret --from-literal=user=admin
+sudo cat /etc/kubernetes/audit/logs/audit.log | grep audit-secret | jq
+```
+
+##### Investigate API access history of a secret:
+- Change audit policy file to include Request + Response from secrets
+- Create a new ServiceAccount (which generates a new secret) and confirm that request + response are available. 
+- Create a pod that uses the SA
+
+```yaml
+vi /etc/kubernetes/audit/policy.yml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+- "RequestReceived"
+rules:
+- level: None
+  verbs: ["get", "watch", "list"]
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["secrets"]       
+
+k create sa random-sa
+cat /etc/kubernetes/audit/logs/audit.log | grep random-sa | jq
+```
+
+---
 ---
 
 Qs:
@@ -985,6 +1072,31 @@ k create clusterrolebinding crb1 --clusterrole=deploy-deleter --user=jane
 k create rolebinding  jim-rb --clusterrole=deploy-deleter --user=jim --namespace red
 ```
 
+---
+
+Restrict the logged data with an audit policy so that:
+1. Nothing from stage RequestReceived is stored
+2. Nothing from "get", "watch" and "list" is stored
+3. From secrets only Metadata is stored
+4. Everything else at RequestResponse level
+
+```yaml
+apiVersion: audit.k8s.io/v1 
+kind: Policy
+omitStages:
+  - "RequestReceived" # 1. Nothing from stage RequestReceived is stored
+rules:
+- level: None 
+  verbs: ["get", "watch", "list"] # Nothing from "get", "watch" and "list" is stored
+
+- level: Metadata 
+  resources:
+  - group: ""
+    resources: ["secrets"] # From secrets only Metadata is stored
+
+- level: RequestResponse # Everything else at RequestResponse level
+
+```
 ---
 
 ### Irrelevant to CSK but valuable regarding security:
