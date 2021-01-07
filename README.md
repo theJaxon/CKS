@@ -16,7 +16,7 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 /proc/<PID>/fd # Shows files opened by this process
 
 /etc/falco # Main config file is falco.yml
-
+/etc/apparmor.d # Contains AppArmor profiles
 ```
 
 ---
@@ -44,13 +44,18 @@ k get secrets -A -oyaml | k replace -f - # This creates all secrets again but th
 crictl pull <image-name>
 crictl ps 
 circtl pods 
+
+# AppArmor 
+apparmor_parser /etc/apparmor.d/<profile-name>
+
 ```
 
 ---
 
 #### Important Documentation pages for CKS:
 1. [Auditing](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
-
+2. [AppArmor](https://kubernetes.io/docs/tutorials/clusters/apparmor/)
+3. [SeccComp](https://kubernetes.io/docs/tutorials/clusters/seccomp/)
 ---
 
 #### NetworkPolicies:
@@ -195,6 +200,165 @@ Decode them, store them in files as they will be used with the curl command to t
 ```bash
 curl https://<server>:6443 # Request fails
 curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key 
+```
+
+---
+---
+
+### :purple_circle: System Hardening:
+#### :small_blue_diamond: 1. Use kernel hardening tools [AppArmor, seccomp]:
+- Containerized app process can communicate with Syscall interface which passes the request to the linux kernel, this needs to be restricted
+- Seccomp or AppArmor will be an additional layer above the Syscall interface 
+
+##### AppArmor:
+- Any application can access system functionality like Filesystem, other processes or Network interfaces.
+- With AppArmor a shield is created between our processes and these functionalities, we control what's allowed or disallowed
+- This is done by creating a `Profile` for the app (ex: new profile will be created for firefox)
+- Same can be done for Kubernetes components (ex: a profile for the Kubelet)
+- There are 3 AppArmor profile modes available:
+  1. Unconfined # Nothing is enforced (Similar to Disabled in SELinux)
+  2. Complain # Processes can escape but it will be logged (Similar to permissive mode in SELinux)
+  3. Enforce # Processes are under control (Similar to .. Enforcing in SELinux ..)
+
+Basic AppArmor commands:
+```bash
+# Show all profiles
+aa-status
+
+# Generate new profile for an application
+aa-genprof
+
+# Put profile in complain mode
+aa-complain
+
+# Put profile in enforce mode
+aa-enforce
+
+# Update the profile if app produced more usage logs
+aa-logprof
+```
+
+##### Setup simple AppArmor for curl:
+```bash
+apt-get install apparmor-utils
+
+# Testing curl before applying AppArmor profile 
+curl -v google.com
+
+TCP_NODELAY set
+* Connected to google.com
+
+# Generate a new profile 
+aa-genprof curl
+
+curl -v google.com
+* Could not resolve host: google.com
+* Closing connection 0
+curl: (6) Could not resolve host: google.com
+
+# Check the profile 
+cd /etc/apparmor.d/<usr.bin.curl> # The profile is named based on the absolute path for the binary
+
+# Update profile according to the logs
+aa-logprof 
+
+# If you curl google.com again the results are back as they were the first time
+```
+
+##### AppArmor profile for Nginx docker container:
+From the documentation there's an AppArmor profile that denies all file writes:
+```bash
+vi /etc/apparmor.d/deny-all-writes
+
+#include <tunables/global>
+
+profile deny-all-writes flags=(attach_disconnected) {
+  #include <abstractions/base>
+
+  file,
+
+  # Deny all file writes.
+  deny /** w,
+}
+
+# Apply the profile using apparmor_parser
+apparmor_parser /etc/apparmor.d/deny-all-writes
+
+# Verify that profile is now loaded
+aa-status | grep deny-all
+```
+
+Test AppArmor docker-default profile with ngninx container
+```bash
+docker run --security-opt apparmor=docker-default nginx
+
+# Result 
+/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+/docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+10-listen-on-ipv6-by-default.sh: info: Getting the checksum of /etc/nginx/conf.d/default.conf
+10-listen-on-ipv6-by-default.sh: info: Enabled listen on IPv6 in /etc/nginx/conf.d/default.conf
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+/docker-entrypoint.sh: Configuration complete; ready for start up
+```
+
+Test AppArmor deny-all-writes profile with the same container
+```bash
+docker run --security-opt apparmor=deny-all-writes nginx
+
+# Result: The container failed to start 
+/docker-entrypoint.sh: No files found in /docker-entrypoint.d/, skipping configuration
+/docker-entrypoint.sh: 13: /docker-entrypoint.sh: cannot create /dev/null: Permission denied
+2021/01/07 11:53:16 [emerg] 1#1: mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)
+nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)
+```
+
+##### [AppArmor with Kubernetes](https://kubernetes.io/docs/tutorials/clusters/apparmor/#securing-a-pod):
+- Container runtime must support AppArmor in order for it to work
+- AppArmor should be installed on the nodes where the pod will be scheduled on
+- AppArmor profile must be available on nodes where AppArmor is installed
+- AppArmor profiles are specified per **Container** not per ~~pod~~
+- In annotations the container and profile are specified as `container.apparmor.security.beta.kubernetes.io/<container_name>: <profile_ref>`
+
+```yaml
+k run app-armor-test --image=nginx $do > nginx.yml
+vi nginx.yml
+
+metadata:
+  annotations:
+    container.apparmor.security.beta.kubernetes.io/app-armor-test: localhost/deny-all-writes
+```
+
+##### Seccomp:
+- "Secure Computing mode" is a security facility in the linux kernel
+- Restricts execution of Syscalls made by processes
+- Seccomp works for the whole pod
+
+```yaml
+# On worker node
+mkdir -p /var/lib/kubelet/seccomp/profiles
+mv audit.json /var/lib/kubelet/seccomp/profiles/
+
+# Create a pod that uses seccomp profile
+apiVersion: v1
+kind: Pod
+metadata:
+  name: audit-pod
+  labels:
+    run: audit-pod
+spec:
+  nodeName: worker1
+  securityContext:
+    seccompProfile:
+      type: Localhost
+      localhostProfile: profiles/audit.json
+  containers:
+  - name: audit-container
+    image: hashicorp/http-echo:0.2.3
+    args:
+    - "-text=just made some syscalls!"
+    securityContext:
+      allowPrivilegeEscalation: false
 ```
 
 ---
