@@ -210,6 +210,8 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 - Containerized app process can communicate with Syscall interface which passes the request to the linux kernel, this needs to be restricted
 - Seccomp or AppArmor will be an additional layer above the Syscall interface 
 
+![AppArmor](https://github.com/theJaxon/CKS/blob/main/etc/System%20Hardening/Diagram1.png)
+
 ##### AppArmor:
 - Any application can access system functionality like Filesystem, other processes or Network interfaces.
 - With AppArmor a shield is created between our processes and these functionalities, we control what's allowed or disallowed
