@@ -13,10 +13,12 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
   /token # The token from the secret that gets created with the sa is here
 
 /proc
-/proc/<PID>/fd # Shows files opened by this process
+  /<PID>/fd # Shows files opened by this process
+  /<PID>/environ # Contains environment variables
 
-/etc/falco # Main config file is falco.yml
-/etc/apparmor.d # Contains AppArmor profiles
+/etc
+  /falco # Main config file is falco.yml
+  /apparmor.d # Contains AppArmor profiles
 ```
 
 ---
@@ -48,17 +50,33 @@ circtl pods
 # AppArmor 
 apparmor_parser /etc/apparmor.d/<profile-name>
 
+# Check open ports
+ss -tunap
+lsof -i :<port-number> # lsof -i :6443
 ```
 
 ---
 
 #### Important Documentation pages for CKS:
 1. [Auditing](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
+   [Log backend section](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/#log-backend)
 2. [AppArmor](https://kubernetes.io/docs/tutorials/clusters/apparmor/)
 3. [SeccComp](https://kubernetes.io/docs/tutorials/clusters/seccomp/)
+
 ---
 
-#### NetworkPolicies:
+### List of Tools:
+
+| Tool       | Use case                                                                                |
+|------------|-----------------------------------------------------------------------------------------|
+| Kube-bench | Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks |
+|            |                                                                                         |
+|            |                                                                                         |
+
+---
+
+### :purple_circle: Cluster Setup:
+#### :small_blue_diamond: 1. Network security policies to restrict cluster level access:
 * Firewall rules in K8s.
 * [CNI Plugin](https://itnext.io/benchmark-results-of-kubernetes-network-plugins-cni-over-10gbit-s-network-updated-august-2020-6e1b757b9e49) must support NetworkPolicies in order for them to take effect.
 * Namespaced 
@@ -93,6 +111,55 @@ Now execting `k exec dnsutils -- wget -qO- nginx` shows no response
 
 ---
 
+#### :small_blue_diamond: 2. Review cluster components security [etcd, kubelet, kubedns, kubeapi] using CIS benchmark:
+##### ETCD security:
+1. Plain text data storage
+
+```bash
+# Store data in etcd (key is cluster and value is kubernetes)
+(
+ETCDCTL_API=3 etcdctl put theawesomecluster "kubernetes" \
+--cacert /etc/kubernetes/pki/etcd/ca.crt \
+--cert /etc/kubernetes/pki/etcd/server.crt \
+--key /etc/kubernetes/pki/etcd/server.key 
+)
+
+# View the data 
+(
+ETCDCTL_API=3 etcdctl get cluster \
+--cacert /etc/kubernetes/pki/etcd/ca.crt \
+--cert /etc/kubernetes/pki/etcd/server.crt \
+--key /etc/kubernetes/pki/etcd/server.key 
+)
+
+> cluster
+> kubernetes
+
+# Dump etcd 
+(
+ETCDCTL_API=3 etcdctl snapshot save \
+--cacert /etc/kubernetes/pki/etcd/ca.crt \
+--cert /etc/kubernetes/pki/etcd/server.crt \
+--key /etc/kubernetes/pki/etcd/server.key \
+/tmp/etcd
+)
+
+# Search etcd 
+cat /tmp/etcd | strings | grep theawesome -B5 -A5
+```
+
+2. Transport security with HTTPS (in transit encryption)
+- Data transferred from API server to ETCD must be encrypted
+
+3. Client Authentication
+- ETCD must enforce that only HTTPS requests with a valid client certificate that is signed by the CA is accepted
+```bash
+--client-cert-auth
+--trusted-ca-file
+```
+
+---
+
 #### Ingress:
 Generate new self signed certificate
 ```
@@ -110,7 +177,7 @@ Disable SA token to prevent the pod from talking to the kubernetes-api
 ---
 
 ### :purple_circle: Cluster Hardening:
-#### 1. Restrict access to kubernetes API:
+#### :small_blue_diamond: 1. Restrict access to kubernetes API:
 What happens when a request gets sent to the kuberntes API?
 When a request is sent to the kubernetes API it goes through 3 levels of checks:
 * Authentication check (Who is the one making the request)
@@ -361,6 +428,20 @@ spec:
     - "-text=just made some syscalls!"
     securityContext:
       allowPrivilegeEscalation: false
+```
+
+---
+
+#### :small_blue_diamond: 2. Minimize host OS footprint (reduce attack surface):
+- Disable snapd 
+```bash
+systemctl mask snapd # Or you can just systemctl disable snapd, masking is just so that nobody systemctl start snapd 
+```
+
+Find and disable the app listening on port 21:
+```bash
+lsof -i :21 # VSFTPD
+systemctl disable vsftpd
 ```
 
 ---
@@ -1039,13 +1120,13 @@ vi /etc/falco/falco_rules.local.yaml
   4. Panic 
 - Audit policy consits of 4 levels:
   1. None # don't log events that match this rule
-  2. Metadata # Log metadata like requesting user, timestamp, resource and verb
-  3. Request # Logs metadata and request body
-  4. RequestResponse # Log metadata, request body and response body 
+  2. Metadata # Log metadata (requesting user, timestamp, resource and verb)
+  3. Request # Logs metadata + request body
+  4. RequestResponse # Log metadata + request body + response body 
 
 ##### Configure API server to store audit logs in JSON format:
 ```yaml
-mkdir -p /etc/kubernetes/audit
+mkdir -pv /etc/kubernetes/audit
 vi /etc/kubernetes/audit/simple.yml
 
 apiVersion: audit.k8s.io/v1 
@@ -1101,6 +1182,32 @@ rules:
 k create sa random-sa
 cat /etc/kubernetes/audit/logs/audit.log | grep random-sa | jq
 ```
+
+##### Recommendations for writing Audit policies:
+1. For sensitive resources like `secrets`, `ConfigMaps` and `TokenReviews` only log at **Metadata** level
+- If responses were also stored this reults in exposing sensitive data
+```yaml
+- level: Metadata
+  resources:
+  - group: ""
+    resources:
+    - secrets
+    - configmaps
+    - tokenreviews
+```
+
+
+2. Don't log read-only URLS
+```yaml
+- level: None 
+  nonResourceURLs:
+  - '/healthz*'
+  - '/version'
+  - '/swagger*'
+```
+
+3. Log at least Metadata level for all resources
+4. Log at RequestResponse level for critical resources
 
 ---
 ---
