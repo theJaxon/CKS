@@ -154,9 +154,13 @@ cat /tmp/etcd | strings | grep theawesome -B5 -A5
 3. Client Authentication
 - ETCD must enforce that only HTTPS requests with a valid client certificate that is signed by the CA is accepted
 ```bash
---client-cert-auth
---trusted-ca-file
+--client-cert-auth=True
+--trusted-ca-file=<path-to-trusted-ca>
 ```
+
+---
+
+##### API Server security:
 
 ---
 
@@ -198,6 +202,8 @@ To restrict API access you should:
 6. Prevent pods from accessing API `automountServiceAccountToken: False`
 
 ##### 1.Block anonymous access:
+> :blue_book: 1.2.1 Ensure that the **--anonymous-auth** argument is set to **false** (Manual) 
+
 * In `/etc/kubernetes/manifests/kube-apiserver.yaml` the **--anonymous-auth** flag can be set to true or false.
 * Anonymous access is enabled by default.
 * RBAC requires explicit authorization for anonymous access.
@@ -215,6 +221,8 @@ curl https://localhost:6443 -k
 ```
 
 ##### 2.Close insecure port:
+> :blue_book: 1.2.19 Ensure that the **--insecure-port** argument is set to **0** (Automated)
+
 * `--insecure-port` can be configured to allow HTTP requests to the API 
 * Request sent over the insecure port **bypassess** authentication and authorization.
 * The insecure port shouldn't be allowed, it's helpful only for debugging purposes.
