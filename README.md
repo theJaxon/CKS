@@ -1299,8 +1299,8 @@ cat /etc/kubernetes/audit/logs/audit.log | grep random-sa | jq
 
 Qs:
 
-#### CKS Exam Series:
-3- [Immutable Pods](https://itnext.io/cks-exam-series-3-immutable-pods-3812cf76cff4):
+### CKS Exam Series:
+#### :clipboard: 3- [Immutable Pods](https://itnext.io/cks-exam-series-3-immutable-pods-3812cf76cff4):
 1. Create Pod holiday with two containers c1 and c2 of image bash:5.1.0, ensure the containers keep running.
 ```yaml
 k run holiday --image=bash:5.1.0 $do > holiday.yml --command sleep 3600
@@ -1455,6 +1455,54 @@ rules:
 - level: RequestResponse # Everything else at RequestResponse level
 
 ```
+
+---
+
+#### 4- [Crash that Apiserver & check logs](https://itnext.io/cks-exam-series-4-crash-that-apiserver-5f4d3d503028):
+
+1. Configure the Apiserver manifest with a new argument --this-is-very-wrong. Check if the Pod comes back up and what logs this causes. Fix the Apiserver again.
+```yaml
+vi /etc/kubernetes/manifests/kube-apiserver.yaml
+containers:
+- command:
+  - kube-apiserver
+  - --this-is-very-wrong
+
+# Check api server pod logs
+cat /var/log/pods/kube-system_kube-apiserver-master_3acb7548a2e6921effda24ba19220d6c/kube-apiserver/2.log
+{"log":"Error: unknown flag: --this-is-very-wrong\n","stream":"stderr","time":"2021-01-12T18:59:48.673662719Z"}
+```
+
+2. Change the existing Apiserver manifest argument to: —-etcd-servers=this-is-very-wrong. Check what the logs say, and fix it again.
+```yaml
+vi /etc/kubernetes/manifests/kube-apiserver.yaml
+containers:
+- command:
+  - kube-apiserver
+  - --etcd-servers=this-is-very-wrong
+
+# Try to execute any kubectl command 
+k get po
+
+> Unable to connect to the server: net/http: TLS handshake timeout
+
+cat /var/log/pods/kube-system_kube-apiserver-master_13a1f8b644ce59316e62202a601b47e7/kube-apiserver/3.log 
+Error while dialing dial tcp: address this-is-very-wrong: missing port in address\". Reconnecting...\n","stream":"stderr","time":"2021-01-12T19:03:32.061085256Z"}
+{"log":"I0112 19:03:33.055244       1 client.go:360] parsed scheme: \"endpoint\"\n","stream":"stderr","time":"2021-01-12T19:03:33.055525393Z"}
+```
+
+3. Change the Apiserver manifest and add invalid YAML. Check what the logs say, and fix again.
+```bash
+# No logs for api server were generated after breaking the YAML file so we can check kubelet logs instead
+journalctl -u kubelet
+```
+
+
+---
+
+#### 5- [ImagePolicyWebhook / AdmissionController](https://itnext.io/cks-exam-series-5-imagepolicywebhook-8d09f1ceee70):
+
+---
 ---
 
 ### Irrelevant to CSK but valuable regarding security:
