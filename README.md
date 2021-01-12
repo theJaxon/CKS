@@ -165,17 +165,85 @@ cat /tmp/etcd | strings | grep theawesome -B5 -A5
 ---
 
 #### Ingress:
-Generate new self signed certificate
+- Create an nginx deployment and a expose it
+```bash
+k create deployment nginx --image=nginx --port=80 $do > nginx.yml
+k apply -f nginx.yml
+
+k expose deploy/nginx --port=80 --target-port=80 --type=LoadBalancer $do > nginx-svc.yml
+k apply -f nginx-svc.yml
 ```
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+- Generate new self signed certificate:
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout ingress.key -out ingress.crt -subj="/CN=test.ingress.com/O=security" -days 365 -nodes
 ```
+- Create a new TLS secret to be used with ingress:
+```bash
+k create secret tls test-ingress-secret --key=ingress.key --cert=ingress.crt $do > test-ingress-secret.yml
+k apply -f test-ingress-secret.yml
+```
+- Use the TLS secret with ingress:
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tls-example-ingress
+spec:
+  tls:
+  - hosts:
+    - test.ingress.com
+    secretName: test-ingress-secret
+  rules:
+  - host: test.ingress.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx
+            port:
+              number: 80
+```
+- Modify /etc/hosts to resolve the site name
+```bash
+vi /etc/hosts
+192.168.100.10 test.ingress.com
+
+k get svc -n ingress-nginx 
+ingress-nginx-controller             NodePort    10.101.54.114   <none>        80:30478/TCP,443:32063/TCP   104m
+
+curl -k https://test.ingress.com:32063
+
+# Inspect server certificate
+curl -kv https://test.ingress.com:32063
+
+* Server certificate:
+*  subject: CN=test.ingress.com; O=security
+*  start date: Jan 12 17:44:31 2021 GMT
+*  expire date: Jan 12 17:44:31 2022 GMT
+
+```
+
 
 ---
 
 #### ServiceAccounts:
-Disable SA token to prevent the pod from talking to the kubernetes-api
+
+> :blue_book: 5.1.5 Ensure that default service accounts are not actively used (Manual)
+
+- ServiceAccounts are namespaced
+- `default` service account gets automatically created when a new namespace gets created
+- pods are automatically mounted with `default` service account
+- Disable SA token to prevent the pod from talking to the kubernetes-api
 * Can be done on the level of the SA itself, in metadata section set `automountServiceAccountToken: False`
 * Can be done on the pod level, in spec `automountServiceAccountToken: False`
+
+- You can also create a new SA for each pod and specify that it should be used.
+```bash
+k create sa nginx 
+k run nginx --image=nginx --serviceaccount=nginx 
+```
 
 ---
 ---
