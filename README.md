@@ -193,6 +193,15 @@ API requests are tied to:
 * Service account 
 * Anonymous request (If the request didn't authenticate)
 
+Default ClusterRole objects and their capabilities `k get clusterrole`: 
+
+| ClusterRole      | Description |
+| ----------- | ----------- |
+| cluster-admin      | Allows performing any desired action on resources       |
+| admin   | Allows admin access, granted within a namespace using a RoleBinding        |
+| edit   | Allows RW access to most objects in a namespace        |
+| view   | Allows RO access to most objects in a namespace         |
+
 To restrict API access you should:
 1. Block anonymous access
 2. Close insecure port 
