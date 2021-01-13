@@ -62,6 +62,7 @@ lsof -i :<port-number> # lsof -i :6443
    [Log backend section](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/#log-backend)
 2. [AppArmor](https://kubernetes.io/docs/tutorials/clusters/apparmor/)
 3. [SeccComp](https://kubernetes.io/docs/tutorials/clusters/seccomp/)
+4. [PSP](https://kubernetes.io/docs/concepts/policy/pod-security-policy/)
 
 ---
 
@@ -652,9 +653,81 @@ NoNewPrivs:     1 # Disable privilege escalation
 ```
 
 ##### [Pod security policy](https://kubernetes.io/docs/concepts/policy/pod-security-policy/):
+> :blue_book: 1.2.16 Ensure that the admission control plugin PodSecurityPolicy is set (Automated)
+
 - Pod security policy is an admission controller which controls under which security conditions a pod has to run
 - Can be enabled by modifying kube-apiserver manifest `--enable-admission-plugins=PodSecurityPolicy`
 - PodSecurityPolicy or OPA can be used to enhance security by enforcing that only specific container registries are allowed.
+
+###### PodSecurityPolicy Workflow:
+
+
+
+1. Create and use a PSP 
+```yaml
+# Nginx will fail if it can't create new files
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: block-nginx
+spec:
+  readOnlyRootFilesystem: True
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  volumes:
+  - '*'
+
+k apply -f block-nginx-psp.yml
+```
+
+2. Create a Role or a ClusterRole that uses the PSP
+```bash
+k create role block-nginx --verb=use --resource=psp --resource-name=block-nginx $do > block-nginx-role.yml 
+k apply -f block-nginx-role.yml
+```
+
+3. Create a RoleBinding or a ClusterRoleBinding that binds the role created to either a SA, a user or a group
+```bash
+# Create a service account 
+k create sa nginx $do > nginx-sa.yml
+k apply -f nginx-sa.yml
+
+# Bind the SA to the created role in a rolebinding
+k create rolebinding block-nginx --role=block-nginx --serviceaccount=default:nginx $do > block-nginx-rolebinding.yml
+k apply -f block-nginx-rolebinding.yml
+```
+
+Test by creating an nginx deployment and checking the logs
+```yaml
+k create deploy nginx --image=nginx $do > nginx-deploy.yml
+
+# Modify it to use the nginx sa instead of the default 
+vi nginx-deploy.yml
+spec:
+  serviceAccountName: nginx
+  containers:
+  - image: nginx
+    name: nginx
+
+# Check if pods were created 
+k get po
+NAME                     READY   STATUS   RESTARTS   AGE
+nginx-694c9fb47d-xjd5d   0/1     Error    2          39s
+
+# Check the events
+k get events --sort-by=metadata.creationTimestamp
+
+# Check the logs 
+k logs k logs nginx-694c9fb47d-xjd5d   
+> 2021/01/13 16:17:00 [emerg] 1#1: mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
+> nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
+```
 
 ```yaml
 spec:
@@ -666,7 +739,7 @@ spec:
 - The default service account need to be modified so that the newly created deployment work with the PodSecurityPolicy
  
 ```bash
-k create role psp-access --verb=use --resource=podsecuritypolicies
+k create role psp-access --verb=use --resource=psp
 k create rolebinding psp-access --role=psp-access --serviceaccount=default:default
 ```
 
@@ -1458,7 +1531,7 @@ rules:
 
 ---
 
-#### 4- [Crash that Apiserver & check logs](https://itnext.io/cks-exam-series-4-crash-that-apiserver-5f4d3d503028):
+#### 4- :clipboard: [Crash that Apiserver & check logs](https://itnext.io/cks-exam-series-4-crash-that-apiserver-5f4d3d503028):
 
 1. Configure the Apiserver manifest with a new argument --this-is-very-wrong. Check if the Pod comes back up and what logs this causes. Fix the Apiserver again.
 ```yaml
@@ -1500,7 +1573,7 @@ journalctl -u kubelet
 
 ---
 
-#### 5- [ImagePolicyWebhook / AdmissionController](https://itnext.io/cks-exam-series-5-imagepolicywebhook-8d09f1ceee70):
+#### 5- :clipboard: [ImagePolicyWebhook / AdmissionController](https://itnext.io/cks-exam-series-5-imagepolicywebhook-8d09f1ceee70):
 
 ---
 ---

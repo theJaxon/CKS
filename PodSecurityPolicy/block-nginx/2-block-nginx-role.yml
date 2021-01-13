@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  creationTimestamp: null
+  name: block-nginx
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - block-nginx
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
