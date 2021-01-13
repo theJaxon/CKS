@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: permissive
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - permissive
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use

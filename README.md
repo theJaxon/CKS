@@ -658,6 +658,27 @@ NoNewPrivs:     1 # Disable privilege escalation
 - Pod security policy is an admission controller which controls under which security conditions a pod has to run
 - Can be enabled by modifying kube-apiserver manifest `--enable-admission-plugins=PodSecurityPolicy`
 - PodSecurityPolicy or OPA can be used to enhance security by enforcing that only specific container registries are allowed.
+- It's recommended that policies are added and authorized first before enabling PSP admission controller.
+- When PSP is allowed, static pods in the `kube-system` namespace will fail to get created by the kubelet, to solve this a permissive PSP needs to be created and associated with the all the authenticated users by using `system:authenticated` group.
+
+###### Permissive PSP to allow pods in kube-system namespace to work:
+```bash
+# Create the PSP before enabling pod security policy 
+k apply -f permissive-psp.yml
+
+k create clusterrole permissive --verb=use --resource=psp --resource-name=permissive $do > permissive-clusterrole.yml
+k apply -f permissive-clusterrole.yml
+
+# Allow the permissive role only to work in the kube-system namespace
+k create rolebinding permissive --clusterrole=permissive --group=system:authenticated -n kube-system $do > permissive-rolebinding.yml
+k apply -f permissive-rolebinding.yml
+
+# Modify kube-apiserver manifest 
+vi /etc/kubernetes/manifests/kube-apiserver.yaml 
+- --enable-admission-plugins=NodeRestriction,PodSecurityPolicy
+
+k get events -n kube-system --sort-by=metadata.creationTimestamp
+```
 
 ###### PodSecurityPolicy Workflow:
 
@@ -741,6 +762,21 @@ spec:
 ```bash
 k create role psp-access --verb=use --resource=psp
 k create rolebinding psp-access --role=psp-access --serviceaccount=default:default
+```
+
+###### Issues regarding hostPath Volumes:
+- hostPath volumes allows us to mount a file or directory from the hosts node FS into the pod
+- The path can be `/` which mounts the whole root of the host into the pod
+- To mitigate this `hostPath` type shouldn't be allowed and this could be done through PSP
+
+```bash
+k apply -f restrictive-psp.yml
+
+k create clusterrole restrictive --verb=use --resource=psp --resource-name=restricted $do > restrictive-clusterrole.yml
+k apply -f restrictive-clusterrole.yml
+
+k create rolebinding restrictive --clusterrole=restrictive --group=system:authenticated -n default $do > restrictive-rolebinding.yml
+k apply -f restrictive-rolebinding.yml
 ```
 
 ##### [Open Policy Agent](https://github.com/open-policy-agent/opa) [OPA]:
