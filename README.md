@@ -661,7 +661,7 @@ NoNewPrivs:     1 # Disable privilege escalation
 
 ###### PodSecurityPolicy Workflow:
 
-
+![PSP-Workflow](https://github.com/theJaxon/CKS/blob/main/etc/PSP/PSP-Workflow.png)
 
 1. Create and use a PSP 
 ```yaml
