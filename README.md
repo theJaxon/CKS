@@ -488,6 +488,8 @@ nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission den
 - AppArmor profiles are specified per **Container** not per ~~pod~~
 - In annotations the container and profile are specified as `container.apparmor.security.beta.kubernetes.io/<container_name>: <profile>`
 
+![AppArmor](https://github.com/theJaxon/CKS/blob/main/etc/AppArmor/AppArmor.png)
+
 1. Create a new profile in `/etc/apparmor.d/<profile> and add load it
 ```bash
 vi /etc/apparmor.d/k8s-deny-all-writes
