@@ -19,6 +19,8 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 /etc
   /falco # Main config file is falco.yml
   /apparmor.d # Contains AppArmor profiles
+    /abstractions # Contains templates that can be included in other apparmor profiles
+    /tunables # Contains pre-defined variables (This directory can be used to either define new variables or make profile tweaks)
 ```
 
 ---
@@ -371,9 +373,16 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 - This is done by creating a `Profile` for the app (ex: new profile will be created for firefox)
 - Same can be done for Kubernetes components (ex: a profile for the Kubelet)
 - There are 3 AppArmor profile modes available:
-  1. Unconfined # Nothing is enforced (Similar to Disabled in SELinux)
-  2. Complain # Processes can escape but it will be logged (Similar to permissive mode in SELinux)
-  3. Enforce # Processes are under control (Similar to .. Enforcing in SELinux ..)
+  1. Unconfined # Nothing is enforced (Similar to **Disabled** in SELinux)
+  2. Complain # Processes can escape but it will be logged (Similar to **permissive** mode in SELinux)
+  3. Enforce # Processes are under control (Similar to .. **Enforcing** in SELinux ..)
+
+```bash
+# Check apparmor service status
+systemctl status apparmor.service
+
+apt-get install apparmor-utils apparmor-profiles apparmor-profiles-extra -y
+```
 
 Basic AppArmor commands:
 ```bash
@@ -386,17 +395,21 @@ aa-genprof
 # Put profile in complain mode
 aa-complain
 
-# Put profile in enforce mode
+# Same as enforce mode except that allowed actions get logged in addition to the actions that were blocked
+aa-audit
+
+# Put profile in enforce mode (only blocked actions gets logged)
 aa-enforce
 
 # Update the profile if app produced more usage logs
 aa-logprof
+
+# Disable the profile completely
+aa-disable
 ```
 
 ##### Setup simple AppArmor for curl:
 ```bash
-apt-get install apparmor-utils
-
 # Testing curl before applying AppArmor profile 
 curl -v google.com
 
@@ -473,15 +486,26 @@ nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission den
 - AppArmor should be installed on the nodes where the pod will be scheduled on
 - AppArmor profile must be available on nodes where AppArmor is installed
 - AppArmor profiles are specified per **Container** not per ~~pod~~
-- In annotations the container and profile are specified as `container.apparmor.security.beta.kubernetes.io/<container_name>: <profile_ref>`
+- In annotations the container and profile are specified as `container.apparmor.security.beta.kubernetes.io/<container_name>: <profile>`
 
+1. Create a new profile in `/etc/apparmor.d/<profile> and add load it
+```bash
+vi /etc/apparmor.d/k8s-deny-all-writes
+apparmor_parser /etc/apparmor.d/k8s-deny-all-writes
+
+# Check the profile 
+aa-status | grep k8s
+>  k8s-deny-all-writes
+```
+
+2. Run the container with the added AppArmir annotation
 ```yaml
 k run app-armor-test --image=nginx $do > nginx.yml
 vi nginx.yml
 
 metadata:
   annotations:
-    container.apparmor.security.beta.kubernetes.io/app-armor-test: localhost/deny-all-writes
+    container.apparmor.security.beta.kubernetes.io/app-armor-test: localhost/k8s-deny-all-writes
 ```
 
 ##### Seccomp:
