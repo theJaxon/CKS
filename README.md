@@ -1692,3 +1692,19 @@ cat 7480*.json | jq '.history'
 tar -xvf 173af461747ed9252ce5c8241a8e2dfbe85ef7a838945445be6ada05f7c6a883/layer.tar
 cat password.txt # Shows password 
 ```
+
+#### 2. Running containers with runc:
+1. Get the rootfs of the image desired
+```bash
+mkdir rootfs
+docker cp <id>:/ rootfs/
+
+# Generate config.json 
+runc spec
+
+# Run container using runc 
+runc run <name>
+
+# From another tab check the containers list running using runc 
+runc list
+```
