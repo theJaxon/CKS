@@ -981,6 +981,7 @@ k get secret -A -oyaml | k replace -f -
 Introducing sandboxes adds another defense layer but it comes with its costs too
 - More resources are needed
 - Not good for syscall heavy workloads
+- A `RuntimeClass` is a non-namespaced resource, it's a feature for selecting container runtime configuration
 
 ##### [Kata Containers](https://github.com/kata-containers/kata-containers):
 - Runs containers inside a lightweight VM thus providing a strong separation layer
