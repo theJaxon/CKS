@@ -1193,6 +1193,8 @@ k run node-exporter --image=quay.io/prometheus/node-exporter
 ##### [ImagePolicyWebhook](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#imagepolicywebhook):
 - If `ImagePolicyWebhook` admission controller is enabled then the request goes through it, if `ImageReview` succeeds from the external service then the request succeeds.
 
+![ImagePolicyWebhook](https://github.com/theJaxon/CKS/blob/main/etc/ImagePolicyWebhook/image-policy-webhook.png)
+
 ##### Custom webhook kubeconfig file:
 ```yaml
 vi /etc/kubernetes/imagePolicy/image-policy.kubeconfig
