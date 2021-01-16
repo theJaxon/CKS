@@ -70,11 +70,11 @@ lsof -i :<port-number> # lsof -i :6443
 
 ### List of Tools:
 
-| Tool       | Use case                                                                                |
-|------------|-----------------------------------------------------------------------------------------|
-| Kube-bench | Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks |
-|            |                                                                                         |
-|            |                                                                                         |
+|        Tool       	|                                         Address                                         	|
+|:-----------------:	|:---------------------------------------------------------------------------------------:	|
+|     Kube-bench    	| Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks 	|
+| Anchore and Trivy 	|                             Container vulnerability scanners                            	|
+|       Falco       	|                                  runtime security tool                                  	|
 
 ---
 
@@ -1193,24 +1193,65 @@ k run node-exporter --image=quay.io/prometheus/node-exporter
 ##### [ImagePolicyWebhook](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#imagepolicywebhook):
 - If `ImagePolicyWebhook` admission controller is enabled then the request goes through it, if `ImageReview` succeeds from the external service then the request succeeds.
 
+##### Custom webhook kubeconfig file:
 ```yaml
-# Create AdmissionConfiguration
+vi /etc/kubernetes/imagePolicy/image-policy.kubeconfig
+
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    certificate-authority: /etc/kubernetes/imagePolicy/webhook.crt
+    server: https://bouncer.local.lan:1323/image_policy
+  name: bouncer_webhook
+contexts:
+- context:
+    cluster: bouncer_webhook
+    user: api-server
+  name: bouncer_validator
+current-context: bouncer_validator
+preferences: {}
+users:
+- name: api-server
+  user:
+    client-certificate: /etc/kubernetes/imagePolicy/api-user.crt
+    client-key: /etc/kubernetes/imagePolicy/api-user.key
+```
+
+##### Create AdmissionConfiguration
+
+```yaml
+vi /etc/kubernetes/imagePolicy/admission-config.yml
+
 apiVersion: apiserver.config.k8s.io/v1
 kind: AdmissionConfiguration
 plugins:
 - name: ImagePolicyWebhook
   configuration:
     imagePolicy:
-      kubeConfigFile: /etc/kubernetes/admission/kubeconf
+      kubeConfigFile: /etc/kubernetes/imagePolicy/image-policy.kubeconfig
       allowTTL: 50
       denyTTL: 50 
       retryBackoff: 500
       defaultAllow: False # Deny all pod creation if external server wasn't available
+```
+
+##### Modify kube-apiserver configuration to enable ImagePolicyWebhook:
+```bash
 # Enable ImagePolicyWebhook
 sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
 - --enable-admission-plugins=NodeRestriction,ImagePolicyWebhook
-- --admission-control-config-file=/etc/kubernetes/admission/admission_config.yml
+- --admission-control-config-file=/etc/kubernetes/admission/admission-config.yml
 
+# Mount the directory 
+volumes:
+- name: image-policy-v 
+  hostPath:
+    path: /etc/kubernetes/imagePolicy 
+
+volumeMounts:
+- name: image-policy-v
+  mountPath: /etc/kubernetes/imagePolicy
 ```
 
 #### :small_blue_diamond: 3. Static analysis (Linting) of user workloads [K8s resources, Dockerfiles]:
@@ -1229,7 +1270,7 @@ sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
 - [Clair](https://github.com/quay/clair) or [Trivy](https://github.com/aquasecurity/trivy) can be used to do vulnerability scanning (This is also considered static analysis)
 
 ##### [Install trivy](https://github.com/aquasecurity/trivy#debianubuntu):
-```
+```bash
 wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
 echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" > /etc/apt/sources.list.d/trivy.list
 apt-get update && apt-get install trivy
@@ -1271,15 +1312,15 @@ cat 7 | strings | grep securepasswd -A10 -B10 # Stored at "/registry/secrets/def
 - /proc/<pid>/environ # Contains environment variables in use for the container
 
 ##### [Falco](https://github.com/falcosecurity/falco) by Sysdig:
-- Cloud native runtime security tool
-Install [falco](https://v1-16.docs.kubernetes.io/docs/tasks/debug-application-cluster/falco/):
-```bash
-curl -s https://falco.org/repo/falcosecurity-3672BA8F.asc | apt-key add -
-echo "deb https://dl.bintray.com/falcosecurity/deb stable main" | tee -a /etc/apt/sources.list.d/falcosecurity.list
-apt-get update -y && apt-get -y install linux-headers-$(uname -r) falco
-systemctl start falco
-journalctl -u falco
-```
+- Falco rules are written in YAML, and have a variety of required and optional keys.
+
+|    Name   |                       Purpose                      |
+|:---------:|:--------------------------------------------------:|
+|    rule   |                  Name of the rule                  |
+|    desc   |    Description of what the rule is filtering for   |
+| condition |  The logic statement that triggers a notification  |
+|   output  | The message that will be shown in the notification |
+|  priority |       The “logging level” of the notification      |
 
 ##### Overriding default Falco rules:
 ```bash
