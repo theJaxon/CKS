@@ -8,7 +8,7 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 
 #### :open_file_folder: Important Dirs:
 ```bash
-# Inside the pod 
+# Inside the container 
 /run/secrets/kubernetes.io/serviceaccount
   /token # The token from the secret that gets created with the sa is here
 
@@ -70,11 +70,12 @@ lsof -i :<port-number> # lsof -i :6443
 
 ### List of Tools:
 
-|        Tool       	|                                         Address                                         	|
-|:-----------------:	|:---------------------------------------------------------------------------------------:	|
-|     Kube-bench    	| Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks 	|
-| Anchore and Trivy 	|                             Container vulnerability scanners                            	|
-|       Falco       	|                                  runtime security tool                                  	|
+|           Tool           	|                                         Address                                         	|
+|:------------------------:	|:---------------------------------------------------------------------------------------:	|
+|        Kube-bench        	| Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks 	|
+| Anchore, Clair and Trivy 	|                             Container vulnerability scanners                            	|
+|           Falco          	|                                  runtime security tool                                  	|
+|          KubeSec         	|             Statically analyze kubernetes resource definitions (YAML files)             	|
 
 ---
 
@@ -115,6 +116,19 @@ Now execting `k exec dnsutils -- wget -qO- nginx` shows no response
 ---
 
 #### :small_blue_diamond: 2. Review cluster components security [etcd, kubelet, kubedns, kubeapi] using CIS benchmark:
+##### Automate the process using kube-bench:
+```bash
+curl -L https://github.com/aquasecurity/kube-bench/releases/download/v0.3.1/kube-bench_0.3.1_linux_amd64.deb -o kube-bench_0.3.1_linux_amd64.deb
+sudo apt install ./kube-bench_0.3.1_linux_amd64.deb -f
+
+# kube-bench [master|node]
+
+# Run kube-bench on master node 
+kube-bench master
+
+# Run kube-bench on worker node
+kube-bench node
+```
 ##### ETCD security:
 1. Plain text data storage
 
@@ -178,7 +192,7 @@ k apply -f nginx-svc.yml
 ```
 - Generate new self signed certificate:
 ```bash
-openssl req -x509 -newkey rsa:4096 -keyout ingress.key -out ingress.crt -subj="/CN=test.ingress.com/O=security" -days 365 -nodes
+openssl req -x509 -newkey rsa:4096 -keyout ingress.key -nodes -subj="/CN=test.ingress.com/O=security" -days 365 -out ingress.crt
 ```
 - Create a new TLS secret to be used with ingress:
 ```bash
@@ -287,6 +301,7 @@ To restrict API access you should:
 * In `/etc/kubernetes/manifests/kube-apiserver.yaml` the **--anonymous-auth** flag can be set to true or false.
 * Anonymous access is enabled by default.
 * RBAC requires explicit authorization for anonymous access.
+* For applying RBAC resources (Roles, RoleBindings, ClusterRoles and ClusterRoleBindings) its preffered if the used command is `k auth reconcile -f name.yaml`
 
 Testing if the API server accepts anonymous requests:
 ```bash
@@ -1384,7 +1399,7 @@ vi /etc/falco/falco_rules.local.yaml
   2. ResponseStarted # Once the response headers are sent but before the response body is sent (this stage is generated only for long-running requests like `watch`)
   3. ResponseComplete # Response body has completed
   4. Panic 
-- Audit policy consits of 4 levels:
+- Each of the aforementioned stages is compared against the rules specified using the next 4 audit levels:
   1. None # don't log events that match this rule
   2. Metadata # Log metadata (requesting user, timestamp, resource and verb)
   3. Request # Logs metadata + request body
