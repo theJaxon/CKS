@@ -21,6 +21,9 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
   /apparmor.d # Contains AppArmor profiles
     /abstractions # Contains templates that can be included in other apparmor profiles
     /tunables # Contains pre-defined variables (This directory can be used to either define new variables or make profile tweaks)
+
+# SECCOMP
+/var/lib/kubelet/seccomp/profiles
 ```
 
 ---
@@ -373,6 +376,38 @@ curl https://<server>:6443 --cacert ca.crt --cert client.crt --key client.key
 ```
 
 ---
+
+#### Helpful tips from CIS benchmarks to secure API server:
+> :blue_book: 1.2.1 Ensure that the --anonymous-auth argument is set to false (Manual)
+
+```bash
+vi /etc/kubernetes/manifests/kube-apiserver.yaml
+--anonymous-auth=False
+```
+
+> :blue_book: 1.2.2 Ensure that the --basic-auth-file argument is not set (Automated)
+
+> :blue_book: 1.2.3 Ensure that the --token-auth-file parameter is not set (Automated)
+
+```bash
+# Comment out the argument
+--basic-auth-file
+--token-auth-file
+```
+
+> :blue_book: 1.2.4 Ensure that the --kubelet-https argument is set to true (Automated)
+
+```bash
+--kubelet-https=True
+```
+
+> 1.2.12 Ensure that the admission control plugin AlwaysPullImages is set (Manual)
+
+```bash
+--enable-admission-plugins=...,AlwaysPullImages,...
+```
+
+---
 ---
 
 ### :purple_circle: System Hardening:
@@ -529,10 +564,21 @@ metadata:
 - "Secure Computing mode" is a security facility in the linux kernel
 - Restricts execution of Syscalls made by processes
 - Seccomp works for the whole pod
+- There are 2 modes for seccomp:
+  1. Strict mode
+  2. Filter mode
+
+```bash
+# Check if seccomp is available on the system 
+grep SECCOMP /boot/config-$(uname -r)
+> CONFIG_SECCOMP=y
+> CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
+> CONFIG_SECCOMP_FILTER=y
+```
 
 ```yaml
 # On worker node
-mkdir -p /var/lib/kubelet/seccomp/profiles
+mkdir -pv /var/lib/kubelet/seccomp/profiles
 mv audit.json /var/lib/kubelet/seccomp/profiles/
 
 # Create a pod that uses seccomp profile
@@ -555,6 +601,19 @@ spec:
     - "-text=just made some syscalls!"
     securityContext:
       allowPrivilegeEscalation: false
+```
+
+Further validating that things worked correctly
+```bash
+# easy way
+k describe po <name> # 
+> Annotations:  seccomp.security.alpha.kubernetes.io/pod: localhost/profiles/audit.json
+
+# Different approach 
+ssh <node-where-seccomp-po-runs>
+ps aux | grep <name> # Here i grep on nginx as i'm running nginx pod .. get the process ID
+grep -i seccomp /proc/<PID>/status
+> Seccomp:        2
 ```
 
 ---
