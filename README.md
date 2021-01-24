@@ -180,10 +180,6 @@ cat /tmp/etcd | strings | grep theawesome -B5 -A5
 
 ---
 
-##### API Server security:
-
----
-
 #### Ingress:
 - Create an nginx deployment and a expose it
 ```bash
@@ -263,6 +259,28 @@ curl -kv https://test.ingress.com:32063
 ```bash
 k create sa nginx 
 k run nginx --image=nginx --serviceaccount=nginx 
+```
+
+#### 5. :small_blue_diamond: Minimize access to GUI elements:
+- The dashboard container should run with the following args:
+```bash
+--insecure-port=0 # Disable serving over HTTP
+--bind-address=127.0.0.1
+```
+
+##### Configure access to the dashboard:
+```bash
+# 1- Create a service account in the namespace needed (Here i'm using default NS)
+k create sa k8s-admin
+
+# 2- Create a cluster role binding for allowing admin level acceess using the SA
+k create clusterrolebinding k8s-admin --clusterrole=cluster-admin --serviceaccount=default:k8s-admin
+
+# 3- Get the secret associated with the create SA
+k8s_admin_secret=$(k get sa k8s-admin -ojsonpath='{.secrets[0].name}')
+k get secret $k8s_admin_secret -o jsonpath='{.data.token}' | base64 -d # Use the token to login to the dashboard
+
+k port-forward svc/kubernetes-dashboard -n kubernetes-dashboard 8888:443 --address 0.0.0.0
 ```
 
 ---
@@ -1330,6 +1348,11 @@ volumeMounts:
   mountPath: /etc/kubernetes/imagePolicy
 ```
 
+```bash
+# Run kube-image-bouncer
+kube-image-bouncer --cert webhook.crt --key webhook.key &
+```
+
 #### :small_blue_diamond: 3. Static analysis (Linting) of user workloads [K8s resources, Dockerfiles]:
 - Checks the source code and text files against specific rules in order to enforce these rules.
 - Static analysis rules examples:
@@ -1352,6 +1375,15 @@ echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main"
 apt-get update && apt-get install trivy
 
 trivy image <name>
+```
+
+##### Use [anchore-cli](https://github.com/anchore/anchore-cli#command-line-examples) to scan images for known vulnerabilities:
+```bash
+anchore-cli image add docker.io/library/debian:latest # Add image to anchore engine
+anchore-cli image wait docker.io/library/debian:latest # Wait for analysis to finish
+anchore-cli image list # List images already analyzed by anchore engine 
+anchore-cli image get docker.io/library/debian:latest # Get summary info about the analyzed image
+anchore-cli image vuln docker.io/library/debian:latest os # Perform vulnerability scan on the image
 ```
 
 ---
