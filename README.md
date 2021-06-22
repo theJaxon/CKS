@@ -9,7 +9,7 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 #### :open_file_folder: Important Dirs:
 ```bash
 # Inside the container 
-/run/secrets/kubernetes.io/serviceaccount
+/var/run/secrets/kubernetes.io/serviceaccount
   /token # The token from the secret that gets created with the sa is here
 
 /proc
@@ -24,6 +24,10 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
 
 # SECCOMP
 /var/lib/kubelet/seccomp/profiles
+
+# Kubelet configuration 
+/var/lib/kubelet/config.yaml
+/etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 ```
 
 ---
@@ -58,6 +62,10 @@ apparmor_parser /etc/apparmor.d/<profile-name>
 # Check open ports
 ss -tunap
 lsof -i :<port-number> # lsof -i :6443
+
+# Restart the kubelet whenever you change the config file
+systemctl daemon-reload
+systemctl restart kubelet.service
 ```
 
 ---
@@ -68,6 +76,9 @@ lsof -i :<port-number> # lsof -i :6443
 2. [AppArmor](https://kubernetes.io/docs/tutorials/clusters/apparmor/)
 3. [SeccComp](https://kubernetes.io/docs/tutorials/clusters/seccomp/)
 4. [PSP](https://kubernetes.io/docs/concepts/policy/pod-security-policy/)
+5. [RuntimeClass](https://kubernetes.io/docs/concepts/containers/runtime-class/)
+6. [NetworkPolicy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
+7. [EncryptionConfiguration](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
 
 ---
 
@@ -260,6 +271,20 @@ curl -kv https://test.ingress.com:32063
 k create sa nginx 
 k run nginx --image=nginx --serviceaccount=nginx 
 ```
+- Whenever a new SA gets created, a `token` also gets generated for it 
+```bash
+k describe sa nginx 
+# Mountable secrets: nginx-token-b4nd4
+# Tokens: nginx-token-b4nd4
+```
+
+- The token is stored as a **Secret** 
+```bash
+k get secrets 
+# nginx-token-b4nd4  kubernetes.io/service-account-token   3      105s
+```
+- You can use this token as an authentication bearer token `k get secret <name> -o jsonpath='{.data.token}'`
+
 
 #### 5. :small_blue_diamond: Minimize access to GUI elements:
 - The dashboard container should run with the following args:
@@ -970,11 +995,13 @@ useradminOpaque"
 </details>
 
 * Encrypting ETCD and secrets inside it:
-This is done by creating an [**`EncryptionConfiguration`**](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) object and passing this object to the API server `--encryption-provider-config` which is the component responsible for communicating with ETCD.
+- This is done by creating an [**`EncryptionConfiguration`**](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) object and passing this object to the API server `--encryption-provider-config` which is the component responsible for communicating with ETCD.
+- The main disadvantage of this approach is that it relies on the key being stored on the host OS, so while this protects against etcd compromise, it doesn't protect against the host OS compromise.
+
 
 How EncryptionConfiguration works?
 - Under `resources` we specify the resources to be encrypted
-- Under `providers` section we specify an array of providers:
+- Under [`providers`](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#providers) section we specify an array of providers:
   - `identity` provider is the default and it doesn't encrypt anything.
   - `aesgcm` | `aescbc` and those are 2 encryption algorithms that can be used
 - The provider section works in order so the first provider defined is used for **encryption on save**
