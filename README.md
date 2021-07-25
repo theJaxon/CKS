@@ -22,12 +22,15 @@ Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
     /abstractions # Contains templates that can be included in other apparmor profiles
     /tunables # Contains pre-defined variables (This directory can be used to either define new variables or make profile tweaks)
 
+# APPARMOR Loaded Profiles 
+/sys/kernel/security/apparmor/profiles
+
 # SECCOMP
 /var/lib/kubelet/seccomp/profiles
 
 # Kubelet configuration 
 /var/lib/kubelet/config.yaml
-/etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+/etc/systemd/system/kubelet.service.d/10-kubeadm.conf # Main kubelet config file that kubeadm uses for kubeadm clusters
 ```
 
 ---
@@ -57,7 +60,12 @@ crictl ps
 circtl pods 
 
 # AppArmor 
+
+# Load profile in enforce mode
 apparmor_parser /etc/apparmor.d/<profile-name>
+
+# Load profile in complain mode 
+apparmor_parser -C /etc/apparmor.d/<profile-name>
 
 # Check open ports
 ss -tunap
@@ -67,6 +75,13 @@ lsof -i :<port-number> # lsof -i :6443
 systemctl daemon-reload
 systemctl restart kubelet.service
 ```
+
+---
+
+#### List of Open Ports on Kubeadm cluster:
+##### Control Plane ports:
+
+##### Worker nodes ports:
 
 ---
 
@@ -457,6 +472,7 @@ vi /etc/kubernetes/manifests/kube-apiserver.yaml
 #### :small_blue_diamond: 1. Use kernel hardening tools [AppArmor, seccomp]:
 - Containerized app process can communicate with Syscall interface which passes the request to the linux kernel, this needs to be restricted
 - Seccomp or AppArmor will be an additional layer above the Syscall interface 
+- Docker has builtin [Seccomp Filter that is used by default](https://github.com/moby/moby/blob/master/profiles/seccomp/default.json) 
 
 ![AppArmor](https://github.com/theJaxon/CKS/blob/main/etc/System%20Hardening/Diagram1.png)
 
@@ -464,6 +480,7 @@ vi /etc/kubernetes/manifests/kube-apiserver.yaml
 - Any application can access system functionality like Filesystem, other processes or Network interfaces.
 - With AppArmor a shield is created between our processes and these functionalities, we control what's allowed or disallowed
 - This is done by creating a `Profile` for the app (ex: new profile will be created for firefox)
+- The profile must be loaded into the Kernel (Can be verified by checking `/sys/kernel/security/apparmor/profiles`)
 - Same can be done for Kubernetes components (ex: a profile for the Kubelet)
 - There are 3 AppArmor profile modes available:
   1. Unconfined # Nothing is enforced (Similar to **Disabled** in SELinux)
@@ -474,7 +491,9 @@ vi /etc/kubernetes/manifests/kube-apiserver.yaml
 # Check apparmor service status
 systemctl status apparmor.service
 
-apt-get install apparmor-utils apparmor-profiles apparmor-profiles-extra -y
+apt-get install apparmor-utils \
+                apparmor-profiles \ 
+                apparmor-profiles-extra -y
 ```
 
 Basic AppArmor commands:
@@ -593,7 +612,7 @@ aa-status | grep k8s
 >  k8s-deny-all-writes
 ```
 
-2. Run the container with the added AppArmir annotation
+2. Run the container with the added AppArmor annotation
 ```yaml
 k run app-armor-test --image=nginx $do > nginx.yml
 vi nginx.yml
@@ -1457,6 +1476,24 @@ cat 7 | strings | grep securepasswd -A10 -B10 # Stored at "/registry/secrets/def
 |   output  | The message that will be shown in the notification |
 |  priority |       The “logging level” of the notification      |
 
+---
+
+##### Useful Falco commands:
+```bash
+#  List all defined fields
+# https://falco.org/docs/rules/supported-fields/
+falco --list
+
+# Apply rules from a custome file 
+falco -r <file> 
+
+# run falco for a specific number of seconds
+falco -M 
+
+# Run a custom file for 30 seconds
+falco -r <file.yml> -M 30
+```
+
 ##### Overriding default Falco rules:
 ```bash
 vi /etc/falco/falco_rules.yaml # Copy the rule that we need to change 
@@ -1494,9 +1531,11 @@ vi /etc/falco/falco_rules.local.yaml
 - This adds more reliability and better security on container level, it also allows easy rollbacks.
 
 #### Enforce immutability on a container level:
+- Disable privileged mode `securityContext.privileged: false`
+- Disable privilege escalation `securityContext.allowPrivilegeEscalation: false`
 - Remove bash/sh from the container
-- Make Filesystem read-only using **SecurityContext** or **PodSecurityPolicy**
-- Run as specific user, never run as root
+- Make Filesystem read-only using **SecurityContext** or **PodSecurityPolicy** `readOnlyRootFilesystem: true`
+- Run as specific user, never run as root ~~`securityContext.runAsUser: 0`~~
 
 ##### Ways to do it in Kubernetes:
 1. Make manual changes to the `command` (Override the default ENTRYPOINT) `chmod a-w-R && nginx`
