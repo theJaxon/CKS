@@ -2,7 +2,7 @@
 ![CKS](https://img.shields.io/badge/-CKS-0690FA?style=for-the-badge&logo=kubernetes&logoColor=white)
 ![K8s](https://img.shields.io/badge/-kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
 
-Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.19
+Preparation for Certified Kubernetes Security Specialist (CKS) Exam V1.30
 
 ---
 
@@ -99,48 +99,50 @@ systemctl restart kubelet.service
 
 ### List of Tools:
 
-|           Tool           	|                                         Address                                         	|
-|:------------------------:	|:---------------------------------------------------------------------------------------:	|
-|        Kube-bench        	| Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks 	|
-| Anchore, Clair and Trivy 	|                             Container vulnerability scanners                            	|
-|           Falco          	|                                  runtime security tool                                  	|
-|          KubeSec         	|             Statically analyze kubernetes resource definitions (YAML files)             	|
+|           Tool           |                                                                                    Purpose                                                                                    |
+|:------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+|        Kube-bench        |                                            Checks whether Kubernetes cluster is secure by verifying that it follows CIS benchmarks                                            |
+| Anchore, Clair and Trivy |                                                                        Container vulnerability scanners                                                                       |
+|           Falco          |                                                                             runtime security tool                                                                             |
+|          KubeSec         |                                                        Statically analyze kubernetes resource definitions (YAML files)                                                        |
+|         AppArmor         |                                    Linux application security system that prevents an application from accessing files it should not access                                   |
+|          gVisor          | Application kernel for containers that limits the host kernel surface accessible to the application while still giving the application access to all the features it expects. |
 
 ---
 
-### :purple_circle: Cluster Setup:
-#### :small_blue_diamond: 1. Network security policies to restrict cluster level access:
+### 1. Cluster Setup
+#### 1.1 Use Network security policies to restrict cluster level access
 * Firewall rules in K8s.
 * [CNI Plugin](https://itnext.io/benchmark-results-of-kubernetes-network-plugins-cni-over-10gbit-s-network-updated-august-2020-6e1b757b9e49) must support NetworkPolicies in order for them to take effect.
 * Namespaced 
 * Restrict ingress/egress for a set of pods based on specified rules.
 
----
-
-##### Examples:
+##### Examples
 
 1. Deny-all policy on a specific pod
-```
-k run nginx --image=nginx 
+```bash
+k run nginx --image nginx --port 80 --labels app=nginx
 k expose po nginx --port 80 --target-port 80 
 k apply -f https://raw.githubusercontent.com/kubernetes/website/master/content/en/examples/admin/dns/dnsutils.yaml
 k exec dnsutils -- wget -qO- nginx # Returns response showing the index page 
-vi netpol.yml
 ```
 
-```yml
-# Deny All ingress traffic to nginx pod
-apiVersion: networking.k8s.io/v1
-kind: NetworkingPolicy 
-metadata:
-  name: deny-nginx-ingress
-spec:
-  podSelector:
-    matchLabels:
-      run: nginx 
-  ingress: [] 
+```yaml
+cat <<'EOF' | k apply -f -
+  # Deny All ingress traffic to nginx pod
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkingPolicy 
+  metadata:
+    name: deny-nginx-ingress
+  spec:
+    podSelector:
+      matchLabels:
+        run: nginx 
+    ingress: [] 
+EOF
 ```
-Now execting `k exec dnsutils -- wget -qO- nginx` shows no response
+
+- Now execting `k exec dnsutils -- wget -qO- nginx` shows no response
 
 ---
 
