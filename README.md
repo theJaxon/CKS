@@ -159,7 +159,7 @@ kube-bench node
 ```bash
 # Store data in etcd (key is cluster and value is kubernetes)
 (
-ETCDCTL_API=3 etcdctl put theawesomecluster "kubernetes" \
+ETCDCTL_API=3 etcdctl put cluster "kubernetes" \
 --cacert /etc/kubernetes/pki/etcd/ca.crt \
 --cert /etc/kubernetes/pki/etcd/server.crt \
 --key /etc/kubernetes/pki/etcd/server.key 
@@ -690,8 +690,15 @@ systemctl disable vsftpd
 ---
 ---
 
-### :purple_circle: Minimize Microservice Vulnerabilities:
-#### :small_blue_diamond: 1. Setup appropriate OS level security domains [PSP, OPA, security contexts]:
+### Minimize Microservice Vulnerabilities
+#### Use appropriate pod security standards
+- Admission control mode can be configured per namespace
+1. Enforce: Rejects Pods with policy violations.
+2. Audit: Allows Pods with policy violations but includes an audit annotation in the audit log event record.
+3. Warn: Allows Pods with policy violations but warns users.
+
+
+#### 1. Setup appropriate OS level security domains [OPA, security contexts]:
 
 Security context:
 - Used to define privilege and access control.
