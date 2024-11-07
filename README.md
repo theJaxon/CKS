@@ -78,19 +78,12 @@ systemctl restart kubelet.service
 
 ---
 
-#### List of Open Ports on Kubeadm cluster:
-##### Control Plane ports:
-
-##### Worker nodes ports:
-
----
-
 #### Important Documentation pages for CKS:
 1. [Auditing](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
    [Log backend section](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/#log-backend)
 2. [AppArmor](https://kubernetes.io/docs/tutorials/clusters/apparmor/)
 3. [SeccComp](https://kubernetes.io/docs/tutorials/clusters/seccomp/)
-4. [PSP](https://kubernetes.io/docs/concepts/policy/pod-security-policy/)
+4. [Pod Security Standards](https://kubernetes.io/docs/tutorials/security/cluster-level-pss/)
 5. [RuntimeClass](https://kubernetes.io/docs/concepts/containers/runtime-class/)
 6. [NetworkPolicy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
 7. [EncryptionConfiguration](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
@@ -814,133 +807,6 @@ allowPrivilegeEscalation: False
 k replace -f alpine.yml --force
 k exec alpine -- cat /proc/1/status
 NoNewPrivs:     1 # Disable privilege escalation
-```
-
-##### [Pod security policy](https://kubernetes.io/docs/concepts/policy/pod-security-policy/):
-> :blue_book: 1.2.16 Ensure that the admission control plugin PodSecurityPolicy is set (Automated)
-
-- Pod security policy is an admission controller which controls under which security conditions a pod has to run
-- Can be enabled by modifying kube-apiserver manifest `--enable-admission-plugins=PodSecurityPolicy`
-- PodSecurityPolicy or OPA can be used to enhance security by enforcing that only specific container registries are allowed.
-- It's recommended that policies are added and authorized first before enabling PSP admission controller.
-- When PSP is allowed, static pods in the `kube-system` namespace will fail to get created by the kubelet, to solve this a permissive PSP needs to be created and associated with the all the authenticated users by using `system:authenticated` group.
-
-###### Permissive PSP to allow pods in kube-system namespace to work:
-```bash
-# Create the PSP before enabling pod security policy 
-k apply -f permissive-psp.yml
-
-k create clusterrole permissive --verb=use --resource=psp --resource-name=permissive $do > permissive-clusterrole.yml
-k apply -f permissive-clusterrole.yml
-
-# Allow the permissive role only to work in the kube-system namespace
-k create rolebinding permissive --clusterrole=permissive --group=system:authenticated -n kube-system $do > permissive-rolebinding.yml
-k apply -f permissive-rolebinding.yml
-
-# Modify kube-apiserver manifest 
-vi /etc/kubernetes/manifests/kube-apiserver.yaml 
-- --enable-admission-plugins=NodeRestriction,PodSecurityPolicy
-
-k get events -n kube-system --sort-by=metadata.creationTimestamp
-```
-
-###### PodSecurityPolicy Workflow:
-
-![PSP-Workflow](https://github.com/theJaxon/CKS/blob/main/etc/PSP/PSP-Workflow.png)
-
-1. Create and use a PSP 
-```yaml
-# Nginx will fail if it can't create new files
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: block-nginx
-spec:
-  readOnlyRootFilesystem: True
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  runAsUser:
-    rule: RunAsAny
-  fsGroup:
-    rule: RunAsAny
-  volumes:
-  - '*'
-
-k apply -f block-nginx-psp.yml
-```
-
-2. Create a Role or a ClusterRole that uses the PSP
-```bash
-k create role block-nginx --verb=use --resource=psp --resource-name=block-nginx $do > block-nginx-role.yml 
-k apply -f block-nginx-role.yml
-```
-
-3. Create a RoleBinding or a ClusterRoleBinding that binds the role created to either a SA, a user or a group
-```bash
-# Create a service account 
-k create sa nginx $do > nginx-sa.yml
-k apply -f nginx-sa.yml
-
-# Bind the SA to the created role in a rolebinding
-k create rolebinding block-nginx --role=block-nginx --serviceaccount=default:nginx $do > block-nginx-rolebinding.yml
-k apply -f block-nginx-rolebinding.yml
-```
-
-Test by creating an nginx deployment and checking the logs
-```yaml
-k create deploy nginx --image=nginx $do > nginx-deploy.yml
-
-# Modify it to use the nginx sa instead of the default 
-vi nginx-deploy.yml
-spec:
-  serviceAccountName: nginx
-  containers:
-  - image: nginx
-    name: nginx
-
-# Check if pods were created 
-k get po
-NAME                     READY   STATUS   RESTARTS   AGE
-nginx-694c9fb47d-xjd5d   0/1     Error    2          39s
-
-# Check the events
-k get events --sort-by=metadata.creationTimestamp
-
-# Check the logs 
-k logs k logs nginx-694c9fb47d-xjd5d   
-> 2021/01/13 16:17:00 [emerg] 1#1: mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
-> nginx: [emerg] mkdir() "/var/cache/nginx/client_temp" failed (30: Read-only file system)
-```
-
-```yaml
-spec:
-  privileged: False
-  allowPrivilegeEscalation: False 
-  # The rest fills in some required fields.
-```
-- This ensures that privileged pods or those who allow privilege escalation will not be created.
-- The default service account need to be modified so that the newly created deployment work with the PodSecurityPolicy
- 
-```bash
-k create role psp-access --verb=use --resource=psp
-k create rolebinding psp-access --role=psp-access --serviceaccount=default:default
-```
-
-###### Issues regarding hostPath Volumes:
-- hostPath volumes allows us to mount a file or directory from the hosts node FS into the pod
-- The path can be `/` which mounts the whole root of the host into the pod
-- To mitigate this `hostPath` type shouldn't be allowed and this could be done through PSP
-
-```bash
-k apply -f restrictive-psp.yml
-
-k create clusterrole restrictive --verb=use --resource=psp --resource-name=restricted $do > restrictive-clusterrole.yml
-k apply -f restrictive-clusterrole.yml
-
-k create rolebinding restrictive --clusterrole=restrictive --group=system:authenticated -n default $do > restrictive-rolebinding.yml
-k apply -f restrictive-rolebinding.yml
 ```
 
 ##### [Open Policy Agent](https://github.com/open-policy-agent/opa) [OPA]:
